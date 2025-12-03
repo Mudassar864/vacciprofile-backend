@@ -1,12 +1,16 @@
 const Pathogen = require('../models/Pathogen');
-
 exports.getAllPathogens = async (req, res, next) => {
   try {
+     const projection = "-_id -__v -createdAt -updatedAt";
+
     const populate = req.query.populate === 'true';
-    let query = Pathogen.find();
+    let query = Pathogen.find().select(projection);
     
     if (populate) {
-      query = query.populate('vaccines').populate('candidateVaccines');
+      query = query.populate({
+        path: 'vaccines',
+        select: 'name vaccineTyp licensingDates'   // Only include these fields
+      });
     }
     
     const pathogens = await query;
@@ -15,6 +19,7 @@ exports.getAllPathogens = async (req, res, next) => {
     next(error);
   }
 };
+
 
 exports.getPathogenById = async (req, res, next) => {
   try {

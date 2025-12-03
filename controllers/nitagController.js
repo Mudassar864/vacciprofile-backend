@@ -4,30 +4,34 @@ exports.getAllNitags = async (req, res, next) => {
   try {
     const { first, last } = req.query;
     let nitags;
-    const totalCount = await Nitag.countDocuments(); // Get total count of all records
+    const totalCount = await Nitag.countDocuments();
+
+    // Fields to hide
+    const projection = "-_id -__v -createdAt -updatedAt";
 
     if (first && last) {
-      const startIndex = parseInt(first, 10) - 1; // Convert to 0-based indexing
+      const startIndex = parseInt(first, 10) - 1;
       const endIndex = parseInt(last, 10);
       const limitCount = endIndex - startIndex;
 
       if (startIndex >= 0 && limitCount > 0) {
         nitags = await Nitag.find()
+          .select(projection)
           .skip(startIndex)
           .limit(limitCount);
       } else {
         return res.status(400).json({ error: 'Invalid range parameters' });
       }
     } else {
-      nitags = await Nitag.find();
+      nitags = await Nitag.find().select(projection);
     }
 
-    // Include totalCount in response so users can calculate remaining (total - fetched)
     res.json({ nitags, totalCount });
   } catch (error) {
     next(error);
   }
 };
+
 
 exports.getNitagByCountry = async (req, res, next) => {
   try {

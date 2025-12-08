@@ -61,9 +61,13 @@ const vaccineSchema = new mongoose.Schema({
 }, {
   timestamps: true
 });
+vaccineSchema.virtual("manufacturerDetails", {
+  ref: "Manufacturer",
+  localField: "manufacturers.manufacturerId",
+  foreignField: "manufacturerId"
+});
 
-// Index for faster queries
-vaccineSchema.index({ pathogenId: 1 });
-vaccineSchema.index({ 'manufacturers.manufacturerId': 1 });
+vaccineSchema.set("toJSON", { virtuals: true });
+vaccineSchema.set("toObject", { virtuals: true });
 
 module.exports = mongoose.model('Vaccine', vaccineSchema);

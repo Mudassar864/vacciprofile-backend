@@ -4,34 +4,11 @@ const Manufacturer = require('../models/Manufacturer');
 
 exports.getAllVaccines = async (req, res, next) => {
   try {
-    const populate = req.query.populate === 'true';
-    let query = Vaccine.find();
-    
-    if (populate) {
-      const vaccines = await query;
-      
-      const pathogenIds = [...new Set(vaccines.flatMap(v => v.pathogenId))];
-      const pathogens = await Pathogen.find({ pathogenId: { $in: pathogenIds } });
-      
-      const manufacturerIds = [...new Set(vaccines.flatMap(v => 
-        v.manufacturers.map(m => m.manufacturerId)
-      ))];
-      const manufacturers = await Manufacturer.find({ manufacturerId: { $in: manufacturerIds } });
-      
-      const vaccinesWithData = vaccines.map(vaccine => {
-        const vaccineObj = vaccine.toObject();
-        vaccineObj.pathogenDetails = pathogens.filter(p => 
-          vaccine.pathogenId.includes(p.pathogenId)
-        );
-        vaccineObj.manufacturerDetails = manufacturers.filter(m =>
-          vaccine.manufacturers.some(vm => vm.manufacturerId === m.manufacturerId)
-        );
-        return vaccineObj;
+    let query = Vaccine.find().populate({
+        path: "manufacturerDetails",
+        select: 'name'   // Only include these fields
       });
-      
-      return res.json(vaccinesWithData);
-    }
-    
+;
     const vaccines = await query;
     res.json(vaccines);
   } catch (error) {

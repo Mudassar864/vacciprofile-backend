@@ -1,14 +1,11 @@
-const Manufacturer = require('../models/Manufacturer');
+const Manufacturer = require("../models/Manufacturer");
 
 exports.getAllManufacturers = async (req, res, next) => {
   try {
-    const populate = req.query.populate === 'true';
     let query = Manufacturer.find();
-    
-    if (populate) {
-      query = query.populate('licensedVaccines').populate('candidateVaccines');
-    }
-    
+
+    query = query.populate({path:"licensedVaccines",select:"-productProfiles"}).populate("candidateVaccines");
+
     const manufacturers = await query;
     res.json(manufacturers);
   } catch (error) {
@@ -18,16 +15,16 @@ exports.getAllManufacturers = async (req, res, next) => {
 
 exports.getManufacturerById = async (req, res, next) => {
   try {
-    const populate = req.query.populate === 'true';
+    const populate = req.query.populate === "true";
     let query = Manufacturer.findOne({ manufacturerId: req.params.id });
-    
+
     if (populate) {
-      query = query.populate('licensedVaccines').populate('candidateVaccines');
+      query = query.populate("licensedVaccines").populate("candidateVaccines");
     }
-    
+
     const manufacturer = await query;
     if (!manufacturer) {
-      return res.status(404).json({ error: 'Manufacturer not found' });
+      return res.status(404).json({ error: "Manufacturer not found" });
     }
     res.json(manufacturer);
   } catch (error) {
@@ -47,18 +44,20 @@ exports.createManufacturer = async (req, res, next) => {
 
 exports.bulkInsertManufacturers = async (req, res, next) => {
   try {
-    const manufacturers = await Manufacturer.insertMany(req.body, { ordered: false });
-    res.status(201).json({ 
-      message: 'Manufacturers inserted successfully', 
+    const manufacturers = await Manufacturer.insertMany(req.body, {
+      ordered: false,
+    });
+    res.status(201).json({
+      message: "Manufacturers inserted successfully",
       count: manufacturers.length,
-      data: manufacturers 
+      data: manufacturers,
     });
   } catch (error) {
     if (error.code === 11000) {
-      res.status(207).json({ 
-        message: 'Some manufacturers already exist', 
+      res.status(207).json({
+        message: "Some manufacturers already exist",
         error: error.message,
-        insertedCount: error.result?.nInserted || 0
+        insertedCount: error.result?.nInserted || 0,
       });
     } else {
       next(error);
@@ -74,7 +73,7 @@ exports.updateManufacturer = async (req, res, next) => {
       { new: true, runValidators: true }
     );
     if (!manufacturer) {
-      return res.status(404).json({ error: 'Manufacturer not found' });
+      return res.status(404).json({ error: "Manufacturer not found" });
     }
     res.json(manufacturer);
   } catch (error) {
@@ -84,11 +83,13 @@ exports.updateManufacturer = async (req, res, next) => {
 
 exports.deleteManufacturer = async (req, res, next) => {
   try {
-    const manufacturer = await Manufacturer.findOneAndDelete({ manufacturerId: req.params.id });
+    const manufacturer = await Manufacturer.findOneAndDelete({
+      manufacturerId: req.params.id,
+    });
     if (!manufacturer) {
-      return res.status(404).json({ error: 'Manufacturer not found' });
+      return res.status(404).json({ error: "Manufacturer not found" });
     }
-    res.json({ message: 'Manufacturer deleted successfully' });
+    res.json({ message: "Manufacturer deleted successfully" });
   } catch (error) {
     next(error);
   }

@@ -1,30 +1,28 @@
 const Nitag = require('../models/Nitag');
 
+const { applyFirstLast } = require("../utils/pagination");
+
 exports.getAllNitags = async (req, res, next) => {
   try {
     const { first, last } = req.query;
-    let nitags;
-    const totalCount = await Nitag.countDocuments();
 
     // Fields to hide
     const projection = "-_id -__v -createdAt -updatedAt";
 
-    if (first && last) {
-      const startIndex = parseInt(first, 10) - 1;
-      const endIndex = parseInt(last, 10);
-      const limitCount = endIndex - startIndex;
+    // Total records
+    const totalCount = await Nitag.countDocuments();
 
-      if (startIndex >= 0 && limitCount > 0) {
-        nitags = await Nitag.find()
-          .select(projection)
-          .skip(startIndex)
-          .limit(limitCount);
-      } else {
-        return res.status(400).json({ error: 'Invalid range parameters' });
-      }
-    } else {
-      nitags = await Nitag.find().select(projection);
+    // Base query
+    let query = Nitag.find().select(projection);
+
+    // Apply reusable pagination logic
+    try {
+      query = applyFirstLast(query, first, last);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
     }
+
+    const nitags = await query;
 
     res.json({ nitags, totalCount });
   } catch (error) {

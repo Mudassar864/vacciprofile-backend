@@ -2,7 +2,6 @@ const Pathogen = require('../models/Pathogen');
 exports.getAllPathogens = async (req, res, next) => {
   try {
      const projection = "-_id -__v -createdAt -updatedAt";
-
     const populate = req.query.populate === 'true';
     let query = Pathogen.find().select(projection);
     

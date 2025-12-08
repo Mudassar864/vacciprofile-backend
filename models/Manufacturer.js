@@ -52,14 +52,12 @@ const manufacturerSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
-// Virtual to get all vaccines manufactured by this company
 manufacturerSchema.virtual('licensedVaccines', {
   ref: 'Vaccine',
   localField: 'manufacturerId',
   foreignField: 'manufacturers.manufacturerId'
 });
 
-// Virtual to get all candidate vaccines by this manufacturer
 manufacturerSchema.virtual('candidateVaccines', {
   ref: 'CandidateVaccine',
   localField: 'name',

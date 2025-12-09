@@ -3,6 +3,7 @@ const router = express.Router();
 const manufacturerController = require('../controllers/manufacturerController');
 
 router.get('/', manufacturerController.getAllManufacturers);
+router.get('/export/csv', manufacturerController.exportManufacturersCsv);
 router.get('/:id', manufacturerController.getManufacturerById);
 router.post('/', manufacturerController.createManufacturer);
 router.post('/bulk', manufacturerController.bulkInsertManufacturers);

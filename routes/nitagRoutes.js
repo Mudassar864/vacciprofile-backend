@@ -3,6 +3,7 @@ const router = express.Router();
 const nitagController = require('../controllers/nitagController');
 
 router.get('/', nitagController.getAllNitags);
+router.get('/export/csv', nitagController.exportNitagsCsv);
 router.get('/:country', nitagController.getNitagByCountry);
 router.post('/', nitagController.createNitag);
 router.post('/bulk', nitagController.bulkInsertNitags);

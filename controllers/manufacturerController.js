@@ -1,4 +1,5 @@
 const Manufacturer = require("../models/Manufacturer");
+const { sendCsv } = require("../utils/csv");
 
 exports.getAllManufacturers = async (req, res, next) => {
   try {
@@ -90,6 +91,17 @@ exports.deleteManufacturer = async (req, res, next) => {
       return res.status(404).json({ error: "Manufacturer not found" });
     }
     res.json({ message: "Manufacturer deleted successfully" });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.exportManufacturersCsv = async (req, res, next) => {
+  try {
+    const data = await Manufacturer.find()
+      .select("-_id -__v -createdAt -updatedAt")
+      .lean();
+    return sendCsv(res, "manufacturers", data);
   } catch (error) {
     next(error);
   }

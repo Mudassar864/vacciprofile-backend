@@ -1,4 +1,5 @@
 const CandidateVaccine = require('../models/CandidateVaccine');
+const { sendCsv } = require('../utils/csv');
 
 exports.getAllCandidateVaccines = async (req, res, next) => {
   try {
@@ -67,6 +68,17 @@ exports.deleteCandidateVaccine = async (req, res, next) => {
       return res.status(404).json({ error: 'Candidate vaccine not found' });
     }
     res.json({ message: 'Candidate vaccine deleted successfully' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.exportCandidateVaccinesCsv = async (req, res, next) => {
+  try {
+    const data = await CandidateVaccine.find()
+      .select("-_id -__v -createdAt -updatedAt")
+      .lean();
+    return sendCsv(res, "candidate_vaccines", data);
   } catch (error) {
     next(error);
   }

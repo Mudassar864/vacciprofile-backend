@@ -5,6 +5,8 @@ const vaccineController = require('../controllers/vaccineController');
 router.get('/', vaccineController.getAllVaccines);
 router.get('/by-pathogen/:pathogenId', vaccineController.getVaccinesByPathogen);
 router.get('/by-manufacturer/:manufacturerId', vaccineController.getVaccinesByManufacturer);
+router.get('/export/csv', vaccineController.exportVaccinesCsv);
+router.get('/by-licenser', vaccineController.getVaccinesByLicenser); // place before :id to avoid cast errors
 router.get('/:id', vaccineController.getVaccineById);
 router.post('/', vaccineController.createVaccine);
 router.post('/bulk', vaccineController.bulkInsertVaccines);

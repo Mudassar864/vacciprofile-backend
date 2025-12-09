@@ -1,14 +1,14 @@
 const Vaccine = require('../models/Vaccine');
 const Pathogen = require('../models/Pathogen');
 const Manufacturer = require('../models/Manufacturer');
+const { sendCsv } = require('../utils/csv');
 
 exports.getAllVaccines = async (req, res, next) => {
   try {
     let query = Vaccine.find().populate({
-        path: "manufacturerDetails",
-        select: 'name'   // Only include these fields
-      });
-;
+      path: "manufacturerDetails",
+      select: "name" // Only include these fields
+    });
     const vaccines = await query;
     res.json(vaccines);
   } catch (error) {
@@ -122,6 +122,77 @@ exports.getVaccinesByManufacturer = async (req, res, next) => {
       'manufacturers.manufacturerId': parseInt(req.params.manufacturerId) 
     });
     res.json(vaccines);
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getVaccinesByLicenser = async (req, res) => {
+  try {
+    // Group vaccines under each licenser name present in licensingDates
+    const grouped = await Vaccine.aggregate([
+      { $unwind: "$licensingDates" },
+      {
+        $match: {
+          "licensingDates.name": { $exists: true, $ne: null, $ne: "" }
+        }
+      },
+      // Pull related pathogen and manufacturer details
+      {
+        $lookup: {
+          from: "pathogens",
+          localField: "pathogenId",
+          foreignField: "pathogenId",
+          as: "pathogenDetails",
+          pipeline: [{ $project: { _id: 0, pathogenId: 1, name: 1 } }]
+        }
+      },
+      {
+        $lookup: {
+          from: "manufacturers",
+          localField: "manufacturers.manufacturerId",
+          foreignField: "manufacturerId",
+          as: "manufacturerDetails",
+          pipeline: [
+            { $project: { _id: 0, manufacturerId: 1, name: 1, country: 1 } }
+          ]
+        }
+      },
+      {
+        $group: {
+          _id: "$licensingDates.name",
+          vaccines: {
+            $push: {
+              vaccineId: "$vaccineId",
+              name: "$name",
+              type: "$licensingDates.type",
+              approvalDate: "$licensingDates.approvalDate",
+              source: "$licensingDates.source",
+              pathogens: "$pathogenDetails",
+              manufacturers: "$manufacturerDetails"
+            }
+          }
+        }
+      },
+      { $project: { _id: 0, licenserName: "$_id", vaccines: 1 } },
+      { $sort: { licenserName: 1 } }
+    ]);
+
+    res.status(200).json({ success: true, data: grouped });
+  } catch (error) {
+    console.error("Error fetching licensing names:", error);
+    res
+      .status(500)
+      .json({ error: "Internal server error", message: error.message });
+  }
+};
+
+exports.exportVaccinesCsv = async (req, res, next) => {
+  try {
+    const vaccines = await Vaccine.find()
+      .select("-_id -__v -createdAt -updatedAt")
+      .lean();
+    return sendCsv(res, "vaccines", vaccines);
   } catch (error) {
     next(error);
   }

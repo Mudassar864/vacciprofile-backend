@@ -1,6 +1,7 @@
 const Nitag = require('../models/Nitag');
 
 const { applyFirstLast } = require("../utils/pagination");
+const { sendCsv } = require("../utils/csv");
 
 exports.getAllNitags = async (req, res, next) => {
   try {
@@ -101,6 +102,17 @@ exports.deleteNitag = async (req, res, next) => {
       return res.status(404).json({ error: 'NITAG not found' });
     }
     res.json({ message: 'NITAG deleted successfully' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.exportNitagsCsv = async (req, res, next) => {
+  try {
+    const data = await Nitag.find()
+      .select("-_id -__v -createdAt -updatedAt")
+      .lean();
+    return sendCsv(res, "nitags", data);
   } catch (error) {
     next(error);
   }

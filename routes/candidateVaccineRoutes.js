@@ -3,6 +3,7 @@ const router = express.Router();
 const candidateVaccineController = require('../controllers/candidateVaccineController');
 
 router.get('/', candidateVaccineController.getAllCandidateVaccines);
+router.get('/export/csv', candidateVaccineController.exportCandidateVaccinesCsv);
 router.get('/:id', candidateVaccineController.getCandidateVaccineById);
 router.post('/', candidateVaccineController.createCandidateVaccine);
 router.post('/bulk', candidateVaccineController.bulkInsertCandidateVaccines);

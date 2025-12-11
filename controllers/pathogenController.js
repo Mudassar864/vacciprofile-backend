@@ -7,7 +7,7 @@ exports.getAllPathogens = async (req, res, next) => {
 
     query = query.populate({
       path: 'vaccines',
-      select: 'name vaccineTyp licensingDates productProfiles'   // Only include these fields
+     
     });
 
     const pathogens = await query;

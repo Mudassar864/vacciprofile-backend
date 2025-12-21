@@ -35,40 +35,252 @@ exports.importVaccines = async (req, res) => {
       });
     });
 
+    // Helper function to merge comma-separated strings without duplicates
+    const mergeStringArrays = (existingStr, newStr) => {
+      if (!existingStr || !existingStr.trim()) return newStr.trim();
+      if (!newStr || !newStr.trim()) return existingStr.trim();
+      
+      const existing = existingStr.split(',').map(s => s.trim()).filter(Boolean);
+      const newItems = newStr.split(',').map(s => s.trim()).filter(Boolean);
+      
+      const merged = [...new Set([...existing, ...newItems])];
+      return merged.join(', ');
+    };
+
     const results = {
       success: [],
       errors: [],
+      updated: [],
     };
+
+    // Log available column names from first record for debugging
+    if (records.length > 0) {
+      console.log('Total records to process:', records.length);
+      console.log('CSV columns:', Object.keys(records[0]));
+      console.log('First record sample:', JSON.stringify(records[0], null, 2));
+    }
 
     for (const record of records) {
       try {
-        const vaccine = await Vaccine.create({
-          name: record.name || record.vaccineName,
-          vaccineType: record.vaccineType || 'single',
-          pathogenNames: record.pathogenNames,
-          manufacturerNames: record.manufacturerNames,
-        });
-        results.success.push(vaccine.name);
+        // Use exact column name from CSV (should be 'name' based on your CSV)
+        const vaccineName = record.name ? String(record.name).trim() : '';
+        
+        if (!vaccineName) {
+          results.errors.push({
+            name: 'Unknown',
+            error: 'Vaccine name is required. Columns found: ' + Object.keys(record).join(', '),
+          });
+          continue;
+        }
+
+        // Check if vaccine already exists
+        const vaccineExists = await Vaccine.findOne({ name: vaccineName });
+
+        console.log(`Processing ${vaccineName}: exists=${!!vaccineExists}, pathogenNames="${record.pathogenNames}", manufacturerNames="${record.manufacturerNames}"`);
+
+        if (vaccineExists) {
+          // Vaccine exists - merge manufacturerNames, pathogenNames, and update vaccineType if they don't match
+          let updatedManufacturerNames = vaccineExists.manufacturerNames;
+          let updatedPathogenNames = vaccineExists.pathogenNames;
+          let updatedVaccineType = vaccineExists.vaccineType;
+          let wasUpdated = false;
+
+          // Use exact column names from CSV
+          const recordVaccineType = record.vaccineType ? String(record.vaccineType).trim().toLowerCase() : null;
+          
+          if (recordVaccineType && ['single', 'combination'].includes(recordVaccineType) && recordVaccineType !== vaccineExists.vaccineType) {
+            updatedVaccineType = recordVaccineType;
+            wasUpdated = true;
+          }
+
+          // Use exact column names from CSV for manufacturerNames
+          const recordManufacturerNames = record.manufacturerNames ? String(record.manufacturerNames).trim() : '';
+
+          if (recordManufacturerNames) {
+            const existingManufacturers = (vaccineExists.manufacturerNames || '').split(',').map(s => s.trim().toLowerCase());
+            const newManufacturers = recordManufacturerNames.split(',').map(s => s.trim()).filter(Boolean);
+            
+            // Check if any new manufacturer doesn't exist
+            const hasNewManufacturer = newManufacturers.some(m => 
+              !existingManufacturers.includes(m.trim().toLowerCase())
+            );
+
+            if (hasNewManufacturer) {
+              updatedManufacturerNames = mergeStringArrays(vaccineExists.manufacturerNames, recordManufacturerNames);
+              wasUpdated = true;
+            }
+          }
+
+          // Use exact column names from CSV for pathogenNames
+          const recordPathogenNames = record.pathogenNames ? String(record.pathogenNames).trim() : '';
+
+          if (recordPathogenNames) {
+            const existingPathogens = (vaccineExists.pathogenNames || '').split(',').map(s => s.trim().toLowerCase());
+            const newPathogens = recordPathogenNames.split(',').map(s => s.trim()).filter(Boolean);
+            
+            // Check if any new pathogen doesn't exist
+            const hasNewPathogen = newPathogens.some(p => 
+              !existingPathogens.includes(p.trim().toLowerCase())
+            );
+
+            if (hasNewPathogen) {
+              updatedPathogenNames = mergeStringArrays(vaccineExists.pathogenNames, recordPathogenNames);
+              wasUpdated = true;
+            }
+          }
+
+          // Update vaccine if there were changes
+          if (wasUpdated) {
+            try {
+              vaccineExists.manufacturerNames = updatedManufacturerNames;
+              vaccineExists.pathogenNames = updatedPathogenNames;
+              vaccineExists.vaccineType = updatedVaccineType;
+              await vaccineExists.save();
+              results.updated.push(`${vaccineName} (updated)`);
+              console.log(`Updated ${vaccineName} successfully`);
+            } catch (saveError) {
+              console.error(`Error saving ${vaccineName}:`, saveError);
+              results.errors.push({
+                name: vaccineName,
+                error: `Failed to update: ${saveError.message}`,
+              });
+            }
+          } else {
+            results.success.push(`${vaccineName} (already exists)`);
+            console.log(`${vaccineName} already exists with matching data`);
+          }
+        } else {
+          // Vaccine doesn't exist - create new one
+          // Try multiple column name variations - use exact column names from CSV first
+          let vaccineType = record.vaccineType;
+          let pathogenNames = record.pathogenNames;
+          let manufacturerNames = record.manufacturerNames;
+          
+          // Fallback to other variations if needed
+          if (!vaccineType) vaccineType = record.VaccineType || record.type || record.Type || 'single';
+          if (!pathogenNames) pathogenNames = record.PathogenNames || record.pathogen || record.Pathogen || record['Pathogen Names'] || '';
+          if (!manufacturerNames) manufacturerNames = record.ManufacturerNames || record.manufacturer || record.Manufacturer || record['Manufacturer Names'] || '';
+          
+          // Convert to string and trim
+          vaccineType = String(vaccineType || 'single').trim().toLowerCase();
+          pathogenNames = String(pathogenNames || '').trim();
+          manufacturerNames = String(manufacturerNames || '').trim();
+          
+          // Check if required fields are present
+          if (!pathogenNames) {
+            results.errors.push({
+              name: vaccineName,
+              error: `Pathogen names are required. Value received: "${record.pathogenNames}". Available columns: ${Object.keys(record).join(', ')}`,
+            });
+            continue;
+          }
+          
+          if (!manufacturerNames) {
+            results.errors.push({
+              name: vaccineName,
+              error: `Manufacturer names are required. Value received: "${record.manufacturerNames}". Available columns: ${Object.keys(record).join(', ')}`,
+            });
+            continue;
+          }
+          
+          // Validate vaccineType enum
+          if (!['single', 'combination'].includes(vaccineType)) {
+            results.errors.push({
+              name: vaccineName,
+              error: `Invalid vaccineType: "${vaccineType}". Must be 'single' or 'combination'`,
+            });
+            continue;
+          }
+          
+          try {
+            console.log(`Creating new vaccine ${vaccineName} with:`, { vaccineType, pathogenNames, manufacturerNames });
+            const vaccine = await Vaccine.create({
+              name: vaccineName,
+              vaccineType,
+              pathogenNames,
+              manufacturerNames,
+            });
+            results.success.push(vaccine.name);
+            console.log(`Successfully created ${vaccineName}`);
+          } catch (createError) {
+            // Catch any create errors and provide detailed message
+            let createErrorMessage = createError.message;
+            if (createError.name === 'ValidationError') {
+              const validationErrors = Object.values(createError.errors).map(err => err.message).join(', ');
+              createErrorMessage = `Validation error: ${validationErrors}`;
+            }
+            if (createError.code === 11000) {
+              createErrorMessage = `Duplicate vaccine name: ${vaccineName}`;
+            }
+            console.error(`Error creating ${vaccineName}:`, createError);
+            results.errors.push({
+              name: vaccineName,
+              error: createErrorMessage,
+            });
+          }
+        }
       } catch (error) {
+        let errorMessage = error.message;
+        const errorName = record.name || record.vaccineName || 'Unknown';
+        
+        // Handle Mongoose validation errors
+        if (error.name === 'ValidationError') {
+          const validationErrors = Object.values(error.errors).map(err => err.message).join(', ');
+          errorMessage = `Validation error: ${validationErrors}`;
+        }
+        
+        // Handle duplicate key error
+        if (error.code === 11000) {
+          errorMessage = `Duplicate vaccine name: ${errorName}`;
+        }
+        
+        // Log the full error for debugging
+        try {
+          console.error(`Error processing vaccine ${errorName}:`, {
+            error: error.message,
+            errorName: error.name,
+            errorCode: error.code,
+            record: record ? Object.keys(record).join(', ') : 'No record',
+          });
+        } catch (logError) {
+          console.error(`Error logging failed: ${logError.message}`);
+        }
+        
         results.errors.push({
-          name: record.name || record.vaccineName,
-          error: error.message,
+          name: errorName,
+          error: errorMessage,
         });
       }
     }
 
+    const totalProcessed = results.success.length + results.updated.length;
+    try {
+      console.log('Import results summary:', {
+        totalProcessed,
+        success: results.success.length,
+        updated: results.updated.length,
+        errors: results.errors.length,
+        firstFewErrors: results.errors.slice(0, 5).map(e => ({ name: e.name, error: e.error })),
+      });
+    } catch (logError) {
+      console.error('Error logging summary:', logError.message);
+    }
+    
     res.status(200).json({
       success: true,
-      message: `Imported ${results.success.length} vaccines successfully`,
+      message: `Processed ${totalProcessed} vaccines successfully (${results.success.length} created/new, ${results.updated.length} updated)`,
       imported: results.success.length,
+      updated: results.updated.length,
       errors: results.errors.length,
       details: results,
     });
   } catch (error) {
+    console.error('Server error in importVaccines:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
       error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
     });
   }
 };

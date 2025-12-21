@@ -76,6 +76,18 @@ exports.getVaccine = async (req, res) => {
   }
 };
 
+// Helper function to merge comma-separated strings without duplicates
+const mergeStringArrays = (existingStr, newStr) => {
+  if (!existingStr || !existingStr.trim()) return newStr.trim();
+  if (!newStr || !newStr.trim()) return existingStr.trim();
+  
+  const existing = existingStr.split(',').map(s => s.trim()).filter(Boolean);
+  const newItems = newStr.split(',').map(s => s.trim()).filter(Boolean);
+  
+  const merged = [...new Set([...existing, ...newItems])];
+  return merged.join(', ');
+};
+
 // @desc    Create vaccine
 // @route   POST /api/vaccines
 // @access  Private/Admin
@@ -87,12 +99,75 @@ exports.createVaccine = async (req, res) => {
     const vaccineExists = await Vaccine.findOne({ name: name.trim() });
 
     if (vaccineExists) {
-      return res.status(400).json({
-        success: false,
-        message: 'Vaccine with this name already exists',
+      // Vaccine exists - merge manufacturerNames, pathogenNames, and update vaccineType if they don't match
+      let updatedManufacturerNames = vaccineExists.manufacturerNames;
+      let updatedPathogenNames = vaccineExists.pathogenNames;
+      let updatedVaccineType = vaccineExists.vaccineType;
+      let wasUpdated = false;
+
+      // Check and update vaccineType if provided and different
+      if (vaccineType && vaccineType.trim() && vaccineType.trim() !== vaccineExists.vaccineType) {
+        updatedVaccineType = vaccineType.trim();
+        wasUpdated = true;
+      }
+
+      if (manufacturerNames && manufacturerNames.trim()) {
+        const existingManufacturers = (vaccineExists.manufacturerNames || '').split(',').map(s => s.trim().toLowerCase());
+        const newManufacturers = manufacturerNames.trim().split(',').map(s => s.trim());
+        
+        // Check if any new manufacturer doesn't exist
+        const hasNewManufacturer = newManufacturers.some(m => 
+          !existingManufacturers.includes(m.trim().toLowerCase())
+        );
+
+        if (hasNewManufacturer) {
+          updatedManufacturerNames = mergeStringArrays(vaccineExists.manufacturerNames, manufacturerNames);
+          wasUpdated = true;
+        }
+      }
+
+      if (pathogenNames && pathogenNames.trim()) {
+        const existingPathogens = (vaccineExists.pathogenNames || '').split(',').map(s => s.trim().toLowerCase());
+        const newPathogens = pathogenNames.trim().split(',').map(s => s.trim());
+        
+        // Check if any new pathogen doesn't exist
+        const hasNewPathogen = newPathogens.some(p => 
+          !existingPathogens.includes(p.trim().toLowerCase())
+        );
+
+        if (hasNewPathogen) {
+          updatedPathogenNames = mergeStringArrays(vaccineExists.pathogenNames, pathogenNames);
+          wasUpdated = true;
+        }
+      }
+
+      // Update vaccine if there were changes
+      if (wasUpdated) {
+        vaccineExists.manufacturerNames = updatedManufacturerNames;
+        vaccineExists.pathogenNames = updatedPathogenNames;
+        vaccineExists.vaccineType = updatedVaccineType;
+        await vaccineExists.save();
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: wasUpdated 
+          ? 'Vaccine updated with new manufacturer/pathogen names' 
+          : 'Vaccine already exists with matching information',
+        vaccine: {
+          id: vaccineExists._id.toString(),
+          name: vaccineExists.name,
+          vaccineType: vaccineExists.vaccineType,
+          pathogenNames: vaccineExists.pathogenNames,
+          manufacturerNames: vaccineExists.manufacturerNames,
+          createdAt: vaccineExists.createdAt,
+          updatedAt: vaccineExists.updatedAt,
+        },
+        wasUpdated,
       });
     }
 
+    // Vaccine doesn't exist - create new one
     const vaccine = await Vaccine.create({
       name: name.trim(),
       vaccineType,

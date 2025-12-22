@@ -307,9 +307,9 @@ exports.deleteVaccine = async (req, res) => {
   }
 };
 
-// @desc    Get all vaccines with populated licensing dates and product profiles
+// @desc    Get all vaccines with populated licensing dates (product profiles fetched on demand)
 // @route   GET /api/vaccines/populated
-// @access  Private/Admin
+// @access  Public
 exports.getVaccinesPopulated = async (req, res) => {
   try {
     const vaccines = await Vaccine.find().sort({ name: 1 });
@@ -321,10 +321,7 @@ exports.getVaccinesPopulated = async (req, res) => {
           vaccineName: v.name,
         }).sort({ approvalDate: 1 });
 
-        // Find product profiles for this vaccine
-        const productProfiles = await ProductProfile.find({
-          vaccineName: v.name,
-        }).sort({ type: 1, name: 1 });
+        // Product profiles are not included - they should be fetched on demand via /api/product-profiles?vaccineName=...
 
         const licensingDatesFormatted = licensingDates.map((ld) => ({
           id: ld._id.toString(),
@@ -338,28 +335,6 @@ exports.getVaccinesPopulated = async (req, res) => {
           updatedAt: ld.updatedAt,
         }));
 
-        const productProfilesFormatted = productProfiles.map((pp) => ({
-          id: pp._id.toString(),
-          vaccineName: pp.vaccineName,
-          type: pp.type,
-          name: pp.name,
-          composition: pp.composition,
-          strainCoverage: pp.strainCoverage,
-          indication: pp.indication,
-          contraindication: pp.contraindication,
-          dosing: pp.dosing,
-          immunogenicity: pp.immunogenicity,
-          Efficacy: pp.Efficacy,
-          durationOfProtection: pp.durationOfProtection,
-          coAdministration: pp.coAdministration,
-          reactogenicity: pp.reactogenicity,
-          safety: pp.safety,
-          vaccinationGoal: pp.vaccinationGoal,
-          others: pp.others,
-          createdAt: pp.createdAt,
-          updatedAt: pp.updatedAt,
-        }));
-
         return {
           id: v._id.toString(),
           name: v.name,
@@ -367,7 +342,7 @@ exports.getVaccinesPopulated = async (req, res) => {
           pathogenNames: v.pathogenNames,
           manufacturerNames: v.manufacturerNames,
           licensingDates: licensingDatesFormatted,
-          productProfiles: productProfilesFormatted,
+          // productProfiles removed - fetch on demand via /api/product-profiles?vaccineName=...
           createdAt: v.createdAt,
           updatedAt: v.updatedAt,
         };
@@ -388,9 +363,9 @@ exports.getVaccinesPopulated = async (req, res) => {
   }
 };
 
-// @desc    Get single vaccine with populated licensing dates and product profiles
+// @desc    Get single vaccine with populated licensing dates (product profiles fetched on demand)
 // @route   GET /api/vaccines/:id/populated
-// @access  Private/Admin
+// @access  Public
 exports.getVaccinePopulated = async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
@@ -414,10 +389,7 @@ exports.getVaccinePopulated = async (req, res) => {
       vaccineName: vaccine.name,
     }).sort({ approvalDate: 1 });
 
-    // Find product profiles for this vaccine
-    const productProfiles = await ProductProfile.find({
-      vaccineName: vaccine.name,
-    }).sort({ type: 1, name: 1 });
+    // Product profiles are not included - they should be fetched on demand via /api/product-profiles?vaccineName=...
 
     const licensingDatesFormatted = licensingDates.map((ld) => ({
       id: ld._id.toString(),
@@ -431,28 +403,6 @@ exports.getVaccinePopulated = async (req, res) => {
       updatedAt: ld.updatedAt,
     }));
 
-    const productProfilesFormatted = productProfiles.map((pp) => ({
-      id: pp._id.toString(),
-      vaccineName: pp.vaccineName,
-      type: pp.type,
-      name: pp.name,
-      composition: pp.composition,
-      strainCoverage: pp.strainCoverage,
-      indication: pp.indication,
-      contraindication: pp.contraindication,
-      dosing: pp.dosing,
-      immunogenicity: pp.immunogenicity,
-      Efficacy: pp.Efficacy,
-      durationOfProtection: pp.durationOfProtection,
-      coAdministration: pp.coAdministration,
-      reactogenicity: pp.reactogenicity,
-      safety: pp.safety,
-      vaccinationGoal: pp.vaccinationGoal,
-      others: pp.others,
-      createdAt: pp.createdAt,
-      updatedAt: pp.updatedAt,
-    }));
-
     res.status(200).json({
       success: true,
       vaccine: {
@@ -462,7 +412,7 @@ exports.getVaccinePopulated = async (req, res) => {
         pathogenNames: vaccine.pathogenNames,
         manufacturerNames: vaccine.manufacturerNames,
         licensingDates: licensingDatesFormatted,
-        productProfiles: productProfilesFormatted,
+        // productProfiles removed - fetch on demand via /api/product-profiles?vaccineName=...
         createdAt: vaccine.createdAt,
         updatedAt: vaccine.updatedAt,
       },

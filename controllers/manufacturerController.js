@@ -329,9 +329,9 @@ exports.deleteManufacturer = async (req, res) => {
   }
 };
 
-// @desc    Get all manufacturers with populated products, sources, vaccines, and candidates
+// @desc    Get all manufacturers with populated products, sources, vaccines, and candidates (product profiles fetched on demand)
 // @route   GET /api/manufacturers/populated
-// @access  Private/Admin
+// @access  Public
 exports.getManufacturersPopulated = async (req, res) => {
   try {
     const manufacturers = await Manufacturer.find().sort({ name: 1 });
@@ -382,7 +382,7 @@ exports.getManufacturersPopulated = async (req, res) => {
           updatedAt: s.updatedAt,
         }));
 
-        // For each vaccine, get licensing dates and product profiles
+        // For each vaccine, get licensing dates (product profiles fetched on demand)
         const vaccinesFormatted = await Promise.all(
           vaccines.map(async (v) => {
             // Find licensing dates for this vaccine
@@ -390,10 +390,7 @@ exports.getManufacturersPopulated = async (req, res) => {
               vaccineName: v.name,
             }).sort({ approvalDate: 1 });
 
-            // Find product profiles for this vaccine
-            const productProfiles = await ProductProfile.find({
-              vaccineName: v.name,
-            }).sort({ type: 1, name: 1 });
+            // Product profiles are not included - they should be fetched on demand via /api/product-profiles?vaccineName=...
 
             const licensingDatesFormatted = licensingDates.map((ld) => ({
               id: ld._id.toString(),
@@ -407,28 +404,6 @@ exports.getManufacturersPopulated = async (req, res) => {
               updatedAt: ld.updatedAt,
             }));
 
-            const productProfilesFormatted = productProfiles.map((pp) => ({
-              id: pp._id.toString(),
-              vaccineName: pp.vaccineName,
-              type: pp.type,
-              name: pp.name,
-              composition: pp.composition,
-              strainCoverage: pp.strainCoverage,
-              indication: pp.indication,
-              contraindication: pp.contraindication,
-              dosing: pp.dosing,
-              immunogenicity: pp.immunogenicity,
-              Efficacy: pp.Efficacy,
-              durationOfProtection: pp.durationOfProtection,
-              coAdministration: pp.coAdministration,
-              reactogenicity: pp.reactogenicity,
-              safety: pp.safety,
-              vaccinationGoal: pp.vaccinationGoal,
-              others: pp.others,
-              createdAt: pp.createdAt,
-              updatedAt: pp.updatedAt,
-            }));
-
             return {
               id: v._id.toString(),
               name: v.name,
@@ -436,7 +411,7 @@ exports.getManufacturersPopulated = async (req, res) => {
               pathogenNames: v.pathogenNames,
               manufacturerNames: v.manufacturerNames,
               licensingDates: licensingDatesFormatted,
-              productProfiles: productProfilesFormatted,
+              // productProfiles removed - fetch on demand via /api/product-profiles?vaccineName=...
               createdAt: v.createdAt,
               updatedAt: v.updatedAt,
             };
@@ -499,9 +474,9 @@ exports.getManufacturersPopulated = async (req, res) => {
   }
 };
 
-// @desc    Get single manufacturer with populated products, sources, vaccines, and candidates
+// @desc    Get single manufacturer with populated products, sources, vaccines, and candidates (product profiles fetched on demand)
 // @route   GET /api/manufacturers/:id/populated
-// @access  Private/Admin
+// @access  Public
 exports.getManufacturerPopulated = async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
@@ -563,7 +538,7 @@ exports.getManufacturerPopulated = async (req, res) => {
       updatedAt: s.updatedAt,
     }));
 
-    // For each vaccine, get licensing dates and product profiles
+    // For each vaccine, get licensing dates (product profiles fetched on demand)
     const vaccinesFormatted = await Promise.all(
       vaccines.map(async (v) => {
         // Find licensing dates for this vaccine
@@ -571,10 +546,7 @@ exports.getManufacturerPopulated = async (req, res) => {
           vaccineName: v.name,
         }).sort({ approvalDate: 1 });
 
-        // Find product profiles for this vaccine
-        const productProfiles = await ProductProfile.find({
-          vaccineName: v.name,
-        }).sort({ type: 1, name: 1 });
+        // Product profiles are not included - they should be fetched on demand via /api/product-profiles?vaccineName=...
 
         const licensingDatesFormatted = licensingDates.map((ld) => ({
           id: ld._id.toString(),
@@ -588,28 +560,6 @@ exports.getManufacturerPopulated = async (req, res) => {
           updatedAt: ld.updatedAt,
         }));
 
-        const productProfilesFormatted = productProfiles.map((pp) => ({
-          id: pp._id.toString(),
-          vaccineName: pp.vaccineName,
-          type: pp.type,
-          name: pp.name,
-          composition: pp.composition,
-          strainCoverage: pp.strainCoverage,
-          indication: pp.indication,
-          contraindication: pp.contraindication,
-          dosing: pp.dosing,
-          immunogenicity: pp.immunogenicity,
-          Efficacy: pp.Efficacy,
-          durationOfProtection: pp.durationOfProtection,
-          coAdministration: pp.coAdministration,
-          reactogenicity: pp.reactogenicity,
-          safety: pp.safety,
-          vaccinationGoal: pp.vaccinationGoal,
-          others: pp.others,
-          createdAt: pp.createdAt,
-          updatedAt: pp.updatedAt,
-        }));
-
         return {
           id: v._id.toString(),
           name: v.name,
@@ -617,7 +567,7 @@ exports.getManufacturerPopulated = async (req, res) => {
           pathogenNames: v.pathogenNames,
           manufacturerNames: v.manufacturerNames,
           licensingDates: licensingDatesFormatted,
-          productProfiles: productProfilesFormatted,
+          // productProfiles removed - fetch on demand via /api/product-profiles?vaccineName=...
           createdAt: v.createdAt,
           updatedAt: v.updatedAt,
         };

@@ -78,6 +78,67 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// API Routes Documentation - Show all GET routes
+app.get('/', (req, res) => {
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  
+  const routes = {
+    vaccines: [
+      '/api/vaccines',
+      '/api/vaccines/populated',
+      '/api/vaccines/:id',
+      '/api/vaccines/:id/populated',
+    ],
+    pathogens: [
+      '/api/pathogens',
+      '/api/pathogens/populated',
+      '/api/pathogens/:id',
+      '/api/pathogens/:id/populated',
+    ],
+    manufacturers: [
+      '/api/manufacturers',
+      '/api/manufacturers/populated',
+      '/api/manufacturers/:id',
+      '/api/manufacturers/:id/populated',
+    ],
+    licensingDates: [
+      '/api/licensing-dates',
+      '/api/licensing-dates/:id',
+    ],
+    productProfiles: [
+      '/api/product-profiles',
+      '/api/product-profiles/:id',
+    ],
+    manufacturerProducts: [
+      '/api/manufacturer-products',
+      '/api/manufacturer-products/:id',
+    ],
+    manufacturerSources: [
+      '/api/manufacturer-sources',
+      '/api/manufacturer-sources/:id',
+    ],
+    manufacturerCandidates: [
+      '/api/manufacturer-candidates',
+      '/api/manufacturer-candidates/:id',
+    ],
+    nitags: [
+      '/api/nitags',
+      '/api/nitags/:id',
+    ],
+    licensers: [
+      '/api/licensers',
+      '/api/licensers/:id',
+    ],
+  };
+
+  res.status(200).json({
+    success: true,
+    message: 'VacciProfile API - Available GET Routes',
+    baseUrl,
+    routes,
+  });
+});
+
 // 404 handler
 app.use('*', (req, res) => {
   res.status(404).json({

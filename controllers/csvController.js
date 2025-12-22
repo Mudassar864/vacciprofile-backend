@@ -11,6 +11,35 @@ const Licenser = require('../models/Licenser');
 const { parse } = require('csv-parse');
 const { stringify } = require('csv-stringify');
 
+// Helper function to parse CSV with proper UTF-8 encoding handling
+const parseCSV = async (buffer) => {
+  // Handle UTF-8 encoding properly, including BOM (Byte Order Mark)
+  let csvData = buffer.toString('utf-8');
+  
+  // Remove UTF-8 BOM if present (common in Excel exports)
+  if (csvData.charCodeAt(0) === 0xFEFF) {
+    csvData = csvData.slice(1);
+  }
+  
+  // Normalize Unicode characters (handles special characters like ® properly)
+  csvData = csvData.normalize('NFC');
+  
+  return new Promise((resolve, reject) => {
+    parse(csvData, {
+      columns: true,
+      skip_empty_lines: true,
+      trim: true,
+      bom: true, // Handle BOM automatically
+      relax_quotes: true, // Handle quotes more flexibly
+      escape: '"', // Proper escape character
+      relax_column_count: true, // Handle inconsistent column counts
+    }, (err, output) => {
+      if (err) reject(err);
+      else resolve(output);
+    });
+  });
+};
+
 // @desc    Import vaccines from CSV
 // @route   POST /api/csv/import/vaccines
 // @access  Private/Admin
@@ -23,17 +52,7 @@ exports.importVaccines = async (req, res) => {
       });
     }
 
-    const csvData = req.file.buffer.toString('utf-8');
-    const records = await new Promise((resolve, reject) => {
-      parse(csvData, {
-        columns: true,
-        skip_empty_lines: true,
-        trim: true,
-      }, (err, output) => {
-        if (err) reject(err);
-        else resolve(output);
-      });
-    });
+    const records = await parseCSV(req.file.buffer);
 
     // Helper function to merge comma-separated strings without duplicates
     const mergeStringArrays = (existingStr, newStr) => {
@@ -63,7 +82,8 @@ exports.importVaccines = async (req, res) => {
     for (const record of records) {
       try {
         // Use exact column name from CSV (should be 'name' based on your CSV)
-        const vaccineName = record.name ? String(record.name).trim() : '';
+        // Normalize Unicode to ensure special characters like ® are handled correctly
+        const vaccineName = record.name ? String(record.name).trim().normalize('NFC') : '';
         
         if (!vaccineName) {
           results.errors.push({
@@ -302,9 +322,10 @@ exports.exportVaccines = async (req, res) => {
       });
     });
 
-    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename=vaccines.csv');
-    res.send(csvData);
+    // Send with UTF-8 BOM to ensure Excel and other tools recognize UTF-8 encoding
+    res.send('\ufeff' + csvData);
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -326,17 +347,7 @@ exports.importLicensingDates = async (req, res) => {
       });
     }
 
-    const csvData = req.file.buffer.toString('utf-8');
-    const records = await new Promise((resolve, reject) => {
-      parse(csvData, {
-        columns: true,
-        skip_empty_lines: true,
-        trim: true,
-      }, (err, output) => {
-        if (err) reject(err);
-        else resolve(output);
-      });
-    });
+    const records = await parseCSV(req.file.buffer);
 
     const results = {
       success: [],
@@ -413,9 +424,10 @@ exports.exportLicensingDates = async (req, res) => {
       });
     });
 
-    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename=licensing-dates.csv');
-    res.send(csvData);
+    // Send with UTF-8 BOM to ensure Excel and other tools recognize UTF-8 encoding
+    res.send('\ufeff' + csvData);
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -437,17 +449,7 @@ exports.importProductProfiles = async (req, res) => {
       });
     }
 
-    const csvData = req.file.buffer.toString('utf-8');
-    const records = await new Promise((resolve, reject) => {
-      parse(csvData, {
-        columns: true,
-        skip_empty_lines: true,
-        trim: true,
-      }, (err, output) => {
-        if (err) reject(err);
-        else resolve(output);
-      });
-    });
+    const records = await parseCSV(req.file.buffer);
 
     const results = {
       success: [],
@@ -540,9 +542,10 @@ exports.exportProductProfiles = async (req, res) => {
       });
     });
 
-    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename=product-profiles.csv');
-    res.send(csvData);
+    // Send with UTF-8 BOM to ensure Excel and other tools recognize UTF-8 encoding
+    res.send('\ufeff' + csvData);
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -564,17 +567,7 @@ exports.importManufacturers = async (req, res) => {
       });
     }
 
-    const csvData = req.file.buffer.toString('utf-8');
-    const records = await new Promise((resolve, reject) => {
-      parse(csvData, {
-        columns: true,
-        skip_empty_lines: true,
-        trim: true,
-      }, (err, output) => {
-        if (err) reject(err);
-        else resolve(output);
-      });
-    });
+    const records = await parseCSV(req.file.buffer);
 
     const results = {
       success: [],
@@ -662,9 +655,10 @@ exports.exportManufacturers = async (req, res) => {
       });
     });
 
-    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename=manufacturers.csv');
-    res.send(csvData);
+    // Send with UTF-8 BOM to ensure Excel and other tools recognize UTF-8 encoding
+    res.send('\ufeff' + csvData);
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -686,17 +680,7 @@ exports.importManufacturerProducts = async (req, res) => {
       });
     }
 
-    const csvData = req.file.buffer.toString('utf-8');
-    const records = await new Promise((resolve, reject) => {
-      parse(csvData, {
-        columns: true,
-        skip_empty_lines: true,
-        trim: true,
-      }, (err, output) => {
-        if (err) reject(err);
-        else resolve(output);
-      });
-    });
+    const records = await parseCSV(req.file.buffer);
 
     const results = {
       success: [],
@@ -752,9 +736,10 @@ exports.exportManufacturerProducts = async (req, res) => {
       });
     });
 
-    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename=manufacturer-products.csv');
-    res.send(csvData);
+    // Send with UTF-8 BOM to ensure Excel and other tools recognize UTF-8 encoding
+    res.send('\ufeff' + csvData);
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -776,17 +761,7 @@ exports.importManufacturerSources = async (req, res) => {
       });
     }
 
-    const csvData = req.file.buffer.toString('utf-8');
-    const records = await new Promise((resolve, reject) => {
-      parse(csvData, {
-        columns: true,
-        skip_empty_lines: true,
-        trim: true,
-      }, (err, output) => {
-        if (err) reject(err);
-        else resolve(output);
-      });
-    });
+    const records = await parseCSV(req.file.buffer);
 
     const results = {
       success: [],
@@ -843,9 +818,10 @@ exports.exportManufacturerSources = async (req, res) => {
       });
     });
 
-    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename=manufacturer-sources.csv');
-    res.send(csvData);
+    // Send with UTF-8 BOM to ensure Excel and other tools recognize UTF-8 encoding
+    res.send('\ufeff' + csvData);
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -867,17 +843,7 @@ exports.importPathogens = async (req, res) => {
       });
     }
 
-    const csvData = req.file.buffer.toString('utf-8');
-    const records = await new Promise((resolve, reject) => {
-      parse(csvData, {
-        columns: true,
-        skip_empty_lines: true,
-        trim: true,
-      }, (err, output) => {
-        if (err) reject(err);
-        else resolve(output);
-      });
-    });
+    const records = await parseCSV(req.file.buffer);
 
     const results = {
       success: [],
@@ -945,9 +911,10 @@ exports.exportPathogens = async (req, res) => {
       });
     });
 
-    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename=pathogens.csv');
-    res.send(csvData);
+    // Send with UTF-8 BOM to ensure Excel and other tools recognize UTF-8 encoding
+    res.send('\ufeff' + csvData);
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -969,17 +936,7 @@ exports.importManufacturerCandidates = async (req, res) => {
       });
     }
 
-    const csvData = req.file.buffer.toString('utf-8');
-    const records = await new Promise((resolve, reject) => {
-      parse(csvData, {
-        columns: true,
-        skip_empty_lines: true,
-        trim: true,
-      }, (err, output) => {
-        if (err) reject(err);
-        else resolve(output);
-      });
-    });
+    const records = await parseCSV(req.file.buffer);
 
     const results = {
       success: [],
@@ -1039,9 +996,10 @@ exports.exportManufacturerCandidates = async (req, res) => {
       });
     });
 
-    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename=manufacturer-candidates.csv');
-    res.send(csvData);
+    // Send with UTF-8 BOM to ensure Excel and other tools recognize UTF-8 encoding
+    res.send('\ufeff' + csvData);
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -1063,17 +1021,7 @@ exports.importNITAGs = async (req, res) => {
       });
     }
 
-    const csvData = req.file.buffer.toString('utf-8');
-    const records = await new Promise((resolve, reject) => {
-      parse(csvData, {
-        columns: true,
-        skip_empty_lines: true,
-        trim: true,
-      }, (err, output) => {
-        if (err) reject(err);
-        else resolve(output);
-      });
-    });
+    const records = await parseCSV(req.file.buffer);
 
     const results = {
       success: [],
@@ -1132,9 +1080,10 @@ exports.exportNITAGs = async (req, res) => {
       });
     });
 
-    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename=nitags.csv');
-    res.send(csvData);
+    // Send with UTF-8 BOM to ensure Excel and other tools recognize UTF-8 encoding
+    res.send('\ufeff' + csvData);
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -1156,17 +1105,7 @@ exports.importLicensers = async (req, res) => {
       });
     }
 
-    const csvData = req.file.buffer.toString('utf-8');
-    const records = await new Promise((resolve, reject) => {
-      parse(csvData, {
-        columns: true,
-        skip_empty_lines: true,
-        trim: true,
-      }, (err, output) => {
-        if (err) reject(err);
-        else resolve(output);
-      });
-    });
+    const records = await parseCSV(req.file.buffer);
 
     const results = {
       success: [],
@@ -1225,9 +1164,10 @@ exports.exportLicensers = async (req, res) => {
       });
     });
 
-    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename=licensers.csv');
-    res.send(csvData);
+    // Send with UTF-8 BOM to ensure Excel and other tools recognize UTF-8 encoding
+    res.send('\ufeff' + csvData);
   } catch (error) {
     res.status(500).json({
       success: false,

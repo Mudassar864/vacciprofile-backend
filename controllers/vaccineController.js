@@ -2,6 +2,7 @@ const Vaccine = require('../models/Vaccine');
 const LicensingDate = require('../models/LicensingDate');
 const ProductProfile = require('../models/ProductProfile');
 const mongoose = require('mongoose');
+const { updateLastUpdate } = require('./lastUpdateController');
 
 // @desc    Get all vaccines
 // @route   GET /api/vaccines
@@ -147,6 +148,7 @@ exports.createVaccine = async (req, res) => {
         vaccineExists.pathogenNames = updatedPathogenNames;
         vaccineExists.vaccineType = updatedVaccineType;
         await vaccineExists.save();
+        await updateLastUpdate('Vaccine');
       }
 
       return res.status(200).json({
@@ -174,6 +176,8 @@ exports.createVaccine = async (req, res) => {
       pathogenNames: pathogenNames.trim(),
       manufacturerNames: manufacturerNames.trim(),
     });
+
+    await updateLastUpdate('Vaccine');
 
     res.status(201).json({
       success: true,
@@ -245,6 +249,8 @@ exports.updateVaccine = async (req, res) => {
       runValidators: true,
     });
 
+    await updateLastUpdate('Vaccine');
+
     res.status(200).json({
       success: true,
       message: 'Vaccine updated successfully',
@@ -293,6 +299,8 @@ exports.deleteVaccine = async (req, res) => {
     await ProductProfile.deleteMany({ vaccineName: vaccine.name });
 
     await Vaccine.findByIdAndDelete(req.params.id);
+
+    await updateLastUpdate('Vaccine');
 
     res.status(200).json({
       success: true,

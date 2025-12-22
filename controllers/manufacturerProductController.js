@@ -1,5 +1,6 @@
 const ManufacturerProduct = require('../models/ManufacturerProduct');
 const mongoose = require('mongoose');
+const { updateLastUpdate } = require('./lastUpdateController');
 
 // @desc    Get all manufacturer products
 // @route   GET /api/manufacturer-products
@@ -88,6 +89,8 @@ exports.createManufacturerProduct = async (req, res) => {
       productDescription: productDescription ? productDescription.trim() : '',
     });
 
+    await updateLastUpdate('ManufacturerProduct');
+
     res.status(201).json({
       success: true,
       message: 'Manufacturer product created successfully',
@@ -142,6 +145,8 @@ exports.updateManufacturerProduct = async (req, res) => {
       runValidators: true,
     });
 
+    await updateLastUpdate('ManufacturerProduct');
+
     res.status(200).json({
       success: true,
       message: 'Manufacturer product updated successfully',
@@ -185,6 +190,8 @@ exports.deleteManufacturerProduct = async (req, res) => {
     }
 
     await ManufacturerProduct.findByIdAndDelete(req.params.id);
+
+    await updateLastUpdate('ManufacturerProduct');
 
     res.status(200).json({
       success: true,

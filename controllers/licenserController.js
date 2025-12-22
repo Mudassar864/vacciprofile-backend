@@ -1,5 +1,6 @@
 const Licenser = require('../models/Licenser');
 const mongoose = require('mongoose');
+const { updateLastUpdate } = require('./lastUpdateController');
 
 // @desc    Get all licensers
 // @route   GET /api/licensers
@@ -111,6 +112,8 @@ exports.createLicenser = async (req, res) => {
       website: website ? website.trim() : '',
     });
 
+    await updateLastUpdate('Licenser');
+
     res.status(201).json({
       success: true,
       message: 'Licenser created successfully',
@@ -189,6 +192,8 @@ exports.updateLicenser = async (req, res) => {
       runValidators: true,
     });
 
+    await updateLastUpdate('Licenser');
+
     res.status(200).json({
       success: true,
       message: 'Licenser updated successfully',
@@ -235,6 +240,8 @@ exports.deleteLicenser = async (req, res) => {
     }
 
     await Licenser.findByIdAndDelete(req.params.id);
+
+    await updateLastUpdate('Licenser');
 
     res.status(200).json({
       success: true,

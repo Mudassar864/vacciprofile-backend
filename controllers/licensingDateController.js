@@ -1,5 +1,6 @@
 const LicensingDate = require('../models/LicensingDate');
 const mongoose = require('mongoose');
+const { updateLastUpdate } = require('./lastUpdateController');
 
 // @desc    Get all licensing dates
 // @route   GET /api/licensing-dates
@@ -97,6 +98,8 @@ exports.createLicensingDate = async (req, res) => {
       lastUpdateOnVaccine: lastUpdateOnVaccine ? lastUpdateOnVaccine.trim() : 'N/A',
     });
 
+    await updateLastUpdate('LicensingDate');
+
     res.status(201).json({
       success: true,
       message: 'Licensing date created successfully',
@@ -157,6 +160,8 @@ exports.updateLicensingDate = async (req, res) => {
       runValidators: true,
     });
 
+    await updateLastUpdate('LicensingDate');
+
     res.status(200).json({
       success: true,
       message: 'Licensing date updated successfully',
@@ -203,6 +208,8 @@ exports.deleteLicensingDate = async (req, res) => {
     }
 
     await LicensingDate.findByIdAndDelete(req.params.id);
+
+    await updateLastUpdate('LicensingDate');
 
     res.status(200).json({
       success: true,

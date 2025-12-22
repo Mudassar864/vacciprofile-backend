@@ -68,6 +68,7 @@ app.use('/api/manufacturer-candidates', require('./routes/manufacturerCandidateR
 app.use('/api/nitags', require('./routes/nitagRoutes'));
 app.use('/api/licensers', require('./routes/licenserRoutes'));
 app.use('/api/csv', require('./routes/csvRoutes'));
+app.use('/api/last-update', require('./routes/lastUpdateRoutes'));
 
 // Health check route
 app.get('/api/health', (req, res) => {

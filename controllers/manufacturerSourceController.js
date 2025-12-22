@@ -1,5 +1,6 @@
 const ManufacturerSource = require('../models/ManufacturerSource');
 const mongoose = require('mongoose');
+const { updateLastUpdate } = require('./lastUpdateController');
 
 // @desc    Get all manufacturer sources
 // @route   GET /api/manufacturer-sources
@@ -91,6 +92,8 @@ exports.createManufacturerSource = async (req, res) => {
       link: link.trim(),
     });
 
+    await updateLastUpdate('ManufacturerSource');
+
     res.status(201).json({
       success: true,
       message: 'Manufacturer source created successfully',
@@ -147,6 +150,8 @@ exports.updateManufacturerSource = async (req, res) => {
       runValidators: true,
     });
 
+    await updateLastUpdate('ManufacturerSource');
+
     res.status(200).json({
       success: true,
       message: 'Manufacturer source updated successfully',
@@ -191,6 +196,8 @@ exports.deleteManufacturerSource = async (req, res) => {
     }
 
     await ManufacturerSource.findByIdAndDelete(req.params.id);
+
+    await updateLastUpdate('ManufacturerSource');
 
     res.status(200).json({
       success: true,

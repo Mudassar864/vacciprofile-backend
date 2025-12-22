@@ -6,6 +6,7 @@ const Vaccine = require('../models/Vaccine');
 const LicensingDate = require('../models/LicensingDate');
 const ProductProfile = require('../models/ProductProfile');
 const mongoose = require('mongoose');
+const { updateLastUpdate } = require('./lastUpdateController');
 
 // @desc    Get all manufacturers
 // @route   GET /api/manufacturers
@@ -161,6 +162,8 @@ exports.createManufacturer = async (req, res) => {
       candidateVaccineNames: candidateVaccineNames ? candidateVaccineNames.trim() : '',
     });
 
+    await updateLastUpdate('Manufacturer');
+
     res.status(201).json({
       success: true,
       message: 'Manufacturer created successfully',
@@ -254,6 +257,8 @@ exports.updateManufacturer = async (req, res) => {
       runValidators: true,
     });
 
+    await updateLastUpdate('Manufacturer');
+
     res.status(200).json({
       success: true,
       message: 'Manufacturer updated successfully',
@@ -315,6 +320,8 @@ exports.deleteManufacturer = async (req, res) => {
     await ManufacturerSource.deleteMany({ manufacturerName: manufacturer.name });
 
     await Manufacturer.findByIdAndDelete(req.params.id);
+
+    await updateLastUpdate('Manufacturer');
 
     res.status(200).json({
       success: true,

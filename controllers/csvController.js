@@ -10,6 +10,7 @@ const NITAG = require('../models/NITAG');
 const Licenser = require('../models/Licenser');
 const { parse } = require('csv-parse');
 const { stringify } = require('csv-stringify');
+const { updateLastUpdate } = require('./lastUpdateController');
 
 // Helper function to parse CSV with proper UTF-8 encoding handling
 const parseCSV = async (buffer) => {
@@ -286,6 +287,11 @@ exports.importVaccines = async (req, res) => {
       console.error('Error logging summary:', logError.message);
     }
     
+    // Update last update time if any vaccines were processed
+    if (totalProcessed > 0) {
+      await updateLastUpdate('Vaccine');
+    }
+
     res.status(200).json({
       success: true,
       message: `Processed ${totalProcessed} vaccines successfully (${results.success.length} created/new, ${results.updated.length} updated)`,
@@ -357,9 +363,11 @@ exports.importLicensingDates = async (req, res) => {
     for (const record of records) {
       try {
         // Handle lastUpdateOnVaccine - preserve the value from CSV if it exists
+        // Support both 'lastUpdateOnVaccine' and 'lastUpdated' column names
         // Only default to 'N/A' if the field is truly missing or empty
-        const lastUpdate = (record.lastUpdateOnVaccine !== undefined && record.lastUpdateOnVaccine !== null && String(record.lastUpdateOnVaccine).trim() !== '')
-          ? String(record.lastUpdateOnVaccine).trim()
+        const lastUpdateValue = record.lastUpdateOnVaccine !== undefined ? record.lastUpdateOnVaccine : record.lastUpdated;
+        const lastUpdate = (lastUpdateValue !== undefined && lastUpdateValue !== null && String(lastUpdateValue).trim() !== '' && String(lastUpdateValue).trim().toUpperCase() !== 'N/A')
+          ? String(lastUpdateValue).trim()
           : 'N/A';
 
         // Handle type field similarly
@@ -367,21 +375,52 @@ exports.importLicensingDates = async (req, res) => {
           ? String(record.type).trim()
           : 'N/A';
 
+        // Handle approvalDate - validate and trim, reject if empty or 'N/A' since it's required
+        const approvalDate = (record.approvalDate !== undefined && record.approvalDate !== null && String(record.approvalDate).trim() !== '' && String(record.approvalDate).trim().toUpperCase() !== 'N/A')
+          ? String(record.approvalDate).trim()
+          : null;
+
+        if (!approvalDate) {
+          results.errors.push({
+            vaccineName: record.vaccineName || 'Unknown',
+            error: 'Approval date is required and cannot be empty or N/A',
+          });
+          continue;
+        }
+
+        // Handle source - validate and trim since it's required
+        const source = (record.source !== undefined && record.source !== null && String(record.source).trim() !== '')
+          ? String(record.source).trim()
+          : null;
+
+        if (!source) {
+          results.errors.push({
+            vaccineName: record.vaccineName || 'Unknown',
+            error: 'Source is required and cannot be empty',
+          });
+          continue;
+        }
+
         const licensingDate = await LicensingDate.create({
           vaccineName: record.vaccineName,
           name: record.name,
           type: type,
-          approvalDate: record.approvalDate,
-          source: record.source,
+          approvalDate: approvalDate,
+          source: source,
           lastUpdateOnVaccine: lastUpdate,
         });
         results.success.push(`${licensingDate.vaccineName} - ${licensingDate.name}`);
       } catch (error) {
         results.errors.push({
-          vaccineName: record.vaccineName,
+          vaccineName: record.vaccineName || 'Unknown',
           error: error.message,
         });
       }
+    }
+
+    // Update last update time if any licensing dates were imported
+    if (results.success.length > 0) {
+      await updateLastUpdate('LicensingDate');
     }
 
     res.status(200).json({
@@ -490,6 +529,11 @@ exports.importProductProfiles = async (req, res) => {
           error: error.message,
         });
       }
+    }
+
+    // Update last update time if any product profiles were imported
+    if (results.success.length > 0) {
+      await updateLastUpdate('ProductProfile');
     }
 
     res.status(200).json({
@@ -604,6 +648,11 @@ exports.importManufacturers = async (req, res) => {
       }
     }
 
+    // Update last update time if any manufacturers were imported
+    if (results.success.length > 0) {
+      await updateLastUpdate('Manufacturer');
+    }
+
     res.status(200).json({
       success: true,
       message: `Imported ${results.success.length} manufacturers successfully`,
@@ -703,6 +752,11 @@ exports.importManufacturerProducts = async (req, res) => {
       }
     }
 
+    // Update last update time if any manufacturer products were imported
+    if (results.success.length > 0) {
+      await updateLastUpdate('ManufacturerProduct');
+    }
+
     res.status(200).json({
       success: true,
       message: `Imported ${results.success.length} manufacturer products successfully`,
@@ -783,6 +837,11 @@ exports.importManufacturerSources = async (req, res) => {
           error: error.message,
         });
       }
+    }
+
+    // Update last update time if any manufacturer sources were imported
+    if (results.success.length > 0) {
+      await updateLastUpdate('ManufacturerSource');
     }
 
     res.status(200).json({
@@ -868,6 +927,11 @@ exports.importPathogens = async (req, res) => {
           error: error.message,
         });
       }
+    }
+
+    // Update last update time if any pathogens were imported
+    if (results.success.length > 0) {
+      await updateLastUpdate('Pathogen');
     }
 
     res.status(200).json({
@@ -963,6 +1027,11 @@ exports.importManufacturerCandidates = async (req, res) => {
       }
     }
 
+    // Update last update time if any manufacturer candidates were imported
+    if (results.success.length > 0) {
+      await updateLastUpdate('ManufacturerCandidate');
+    }
+
     res.status(200).json({
       success: true,
       message: `Imported ${results.success.length} manufacturer candidates successfully`,
@@ -1047,6 +1116,11 @@ exports.importNITAGs = async (req, res) => {
       }
     }
 
+    // Update last update time if any NITAGs were imported
+    if (results.success.length > 0) {
+      await updateLastUpdate('NITAG');
+    }
+
     res.status(200).json({
       success: true,
       message: `Imported ${results.success.length} NITAGs successfully`,
@@ -1129,6 +1203,11 @@ exports.importLicensers = async (req, res) => {
           error: error.message,
         });
       }
+    }
+
+    // Update last update time if any licensers were imported
+    if (results.success.length > 0) {
+      await updateLastUpdate('Licenser');
     }
 
     res.status(200).json({

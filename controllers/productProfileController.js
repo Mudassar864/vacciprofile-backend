@@ -1,5 +1,6 @@
 const ProductProfile = require('../models/ProductProfile');
 const mongoose = require('mongoose');
+const { updateLastUpdate } = require('./lastUpdateController');
 
 // @desc    Get all product profiles
 // @route   GET /api/product-profiles
@@ -146,6 +147,8 @@ exports.createProductProfile = async (req, res) => {
       others: others ? others.trim() : '- not licensed yet -',
     });
 
+    await updateLastUpdate('ProductProfile');
+
     res.status(201).json({
       success: true,
       message: 'Product profile created successfully',
@@ -243,6 +246,8 @@ exports.updateProductProfile = async (req, res) => {
       runValidators: true,
     });
 
+    await updateLastUpdate('ProductProfile');
+
     res.status(200).json({
       success: true,
       message: 'Product profile updated successfully',
@@ -299,6 +304,8 @@ exports.deleteProductProfile = async (req, res) => {
     }
 
     await ProductProfile.findByIdAndDelete(req.params.id);
+
+    await updateLastUpdate('ProductProfile');
 
     res.status(200).json({
       success: true,

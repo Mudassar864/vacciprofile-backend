@@ -1,5 +1,6 @@
 const NITAG = require('../models/NITAG');
 const mongoose = require('mongoose');
+const { updateLastUpdate } = require('./lastUpdateController');
 
 // @desc    Get all NITAGs
 // @route   GET /api/nitags
@@ -111,6 +112,8 @@ exports.createNITAG = async (req, res) => {
       yearEstablished: yearEstablished ? String(yearEstablished).trim() : '',
     });
 
+    await updateLastUpdate('NITAG');
+
     res.status(201).json({
       success: true,
       message: 'NITAG created successfully',
@@ -190,6 +193,8 @@ exports.updateNITAG = async (req, res) => {
       runValidators: true,
     });
 
+    await updateLastUpdate('NITAG');
+
     res.status(200).json({
       success: true,
       message: 'NITAG updated successfully',
@@ -236,6 +241,8 @@ exports.deleteNITAG = async (req, res) => {
     }
 
     await NITAG.findByIdAndDelete(req.params.id);
+
+    await updateLastUpdate('NITAG');
 
     res.status(200).json({
       success: true,

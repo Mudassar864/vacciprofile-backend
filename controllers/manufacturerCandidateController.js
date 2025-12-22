@@ -1,5 +1,6 @@
 const ManufacturerCandidate = require('../models/ManufacturerCandidate');
 const mongoose = require('mongoose');
+const { updateLastUpdate } = require('./lastUpdateController');
 
 // @desc    Get all manufacturer candidates
 // @route   GET /api/manufacturer-candidates
@@ -110,6 +111,8 @@ exports.createManufacturerCandidate = async (req, res) => {
       other: other ? other.trim() : '',
     });
 
+    await updateLastUpdate('ManufacturerCandidate');
+
     res.status(201).json({
       success: true,
       message: 'Manufacturer candidate created successfully',
@@ -180,6 +183,8 @@ exports.updateManufacturerCandidate = async (req, res) => {
       runValidators: true,
     });
 
+    await updateLastUpdate('ManufacturerCandidate');
+
     res.status(200).json({
       success: true,
       message: 'Manufacturer candidate updated successfully',
@@ -227,6 +232,8 @@ exports.deleteManufacturerCandidate = async (req, res) => {
     }
 
     await ManufacturerCandidate.findByIdAndDelete(req.params.id);
+
+    await updateLastUpdate('ManufacturerCandidate');
 
     res.status(200).json({
       success: true,

@@ -3,6 +3,7 @@ const LicensingDate = require('../models/LicensingDate');
 const ProductProfile = require('../models/ProductProfile');
 const mongoose = require('mongoose');
 const { updateLastUpdate } = require('./lastUpdateController');
+const { clearVaccineCache } = require('../middleware/cacheHelper');
 
 // @desc    Get all vaccines
 // @route   GET /api/vaccines
@@ -149,6 +150,7 @@ exports.createVaccine = async (req, res) => {
         vaccineExists.vaccineType = updatedVaccineType;
         await vaccineExists.save();
         await updateLastUpdate('Vaccine');
+        clearVaccineCache();
       }
 
       return res.status(200).json({
@@ -178,6 +180,7 @@ exports.createVaccine = async (req, res) => {
     });
 
     await updateLastUpdate('Vaccine');
+    clearVaccineCache();
 
     res.status(201).json({
       success: true,
@@ -250,6 +253,7 @@ exports.updateVaccine = async (req, res) => {
     });
 
     await updateLastUpdate('Vaccine');
+    clearVaccineCache();
 
     res.status(200).json({
       success: true,
@@ -301,6 +305,7 @@ exports.deleteVaccine = async (req, res) => {
     await Vaccine.findByIdAndDelete(req.params.id);
 
     await updateLastUpdate('Vaccine');
+    clearVaccineCache();
 
     res.status(200).json({
       success: true,

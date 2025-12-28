@@ -1,6 +1,7 @@
 const NITAG = require('../models/NITAG');
 const mongoose = require('mongoose');
 const { updateLastUpdate } = require('./lastUpdateController');
+const { clearNITAGCache } = require('../middleware/cacheHelper');
 
 // @desc    Get all NITAGs
 // @route   GET /api/nitags
@@ -113,6 +114,7 @@ exports.createNITAG = async (req, res) => {
     });
 
     await updateLastUpdate('NITAG');
+    clearNITAGCache();
 
     res.status(201).json({
       success: true,
@@ -194,6 +196,7 @@ exports.updateNITAG = async (req, res) => {
     });
 
     await updateLastUpdate('NITAG');
+    clearNITAGCache();
 
     res.status(200).json({
       success: true,
@@ -243,6 +246,7 @@ exports.deleteNITAG = async (req, res) => {
     await NITAG.findByIdAndDelete(req.params.id);
 
     await updateLastUpdate('NITAG');
+    clearNITAGCache();
 
     res.status(200).json({
       success: true,

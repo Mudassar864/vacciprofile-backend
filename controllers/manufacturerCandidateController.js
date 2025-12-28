@@ -1,6 +1,7 @@
 const ManufacturerCandidate = require('../models/ManufacturerCandidate');
 const mongoose = require('mongoose');
 const { updateLastUpdate } = require('./lastUpdateController');
+const { clearManufacturerCache } = require('../middleware/cacheHelper');
 
 // @desc    Get all manufacturer candidates
 // @route   GET /api/manufacturer-candidates
@@ -112,6 +113,7 @@ exports.createManufacturerCandidate = async (req, res) => {
     });
 
     await updateLastUpdate('ManufacturerCandidate');
+    clearManufacturerCache();
 
     res.status(201).json({
       success: true,
@@ -184,6 +186,7 @@ exports.updateManufacturerCandidate = async (req, res) => {
     });
 
     await updateLastUpdate('ManufacturerCandidate');
+    clearManufacturerCache();
 
     res.status(200).json({
       success: true,
@@ -234,6 +237,7 @@ exports.deleteManufacturerCandidate = async (req, res) => {
     await ManufacturerCandidate.findByIdAndDelete(req.params.id);
 
     await updateLastUpdate('ManufacturerCandidate');
+    clearManufacturerCache();
 
     res.status(200).json({
       success: true,

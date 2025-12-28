@@ -4,6 +4,7 @@ const LicensingDate = require('../models/LicensingDate');
 const ProductProfile = require('../models/ProductProfile');
 const mongoose = require('mongoose');
 const { updateLastUpdate } = require('./lastUpdateController');
+const { clearPathogenCache } = require('../middleware/cacheHelper');
 
 // @desc    Get all pathogens
 // @route   GET /api/pathogens
@@ -120,6 +121,7 @@ exports.createPathogen = async (req, res) => {
     });
 
     await updateLastUpdate('Pathogen');
+    clearPathogenCache();
 
     res.status(201).json({
       success: true,
@@ -202,6 +204,7 @@ exports.updatePathogen = async (req, res) => {
     });
 
     await updateLastUpdate('Pathogen');
+    clearPathogenCache();
 
     res.status(200).json({
       success: true,
@@ -252,6 +255,7 @@ exports.deletePathogen = async (req, res) => {
     await Pathogen.findByIdAndDelete(req.params.id);
 
     await updateLastUpdate('Pathogen');
+    clearPathogenCache();
 
     res.status(200).json({
       success: true,

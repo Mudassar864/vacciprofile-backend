@@ -1,6 +1,7 @@
 const Licenser = require('../models/Licenser');
 const mongoose = require('mongoose');
 const { updateLastUpdate } = require('./lastUpdateController');
+const { clearLicenserCache } = require('../middleware/cacheHelper');
 
 // @desc    Get all licensers
 // @route   GET /api/licensers
@@ -113,6 +114,7 @@ exports.createLicenser = async (req, res) => {
     });
 
     await updateLastUpdate('Licenser');
+    clearLicenserCache();
 
     res.status(201).json({
       success: true,
@@ -193,6 +195,7 @@ exports.updateLicenser = async (req, res) => {
     });
 
     await updateLastUpdate('Licenser');
+    clearLicenserCache();
 
     res.status(200).json({
       success: true,
@@ -242,6 +245,7 @@ exports.deleteLicenser = async (req, res) => {
     await Licenser.findByIdAndDelete(req.params.id);
 
     await updateLastUpdate('Licenser');
+    clearLicenserCache();
 
     res.status(200).json({
       success: true,

@@ -1,6 +1,7 @@
 const ManufacturerSource = require('../models/ManufacturerSource');
 const mongoose = require('mongoose');
 const { updateLastUpdate } = require('./lastUpdateController');
+const { clearManufacturerCache } = require('../middleware/cacheHelper');
 
 // @desc    Get all manufacturer sources
 // @route   GET /api/manufacturer-sources
@@ -93,6 +94,7 @@ exports.createManufacturerSource = async (req, res) => {
     });
 
     await updateLastUpdate('ManufacturerSource');
+    clearManufacturerCache();
 
     res.status(201).json({
       success: true,
@@ -151,6 +153,7 @@ exports.updateManufacturerSource = async (req, res) => {
     });
 
     await updateLastUpdate('ManufacturerSource');
+    clearManufacturerCache();
 
     res.status(200).json({
       success: true,
@@ -198,6 +201,7 @@ exports.deleteManufacturerSource = async (req, res) => {
     await ManufacturerSource.findByIdAndDelete(req.params.id);
 
     await updateLastUpdate('ManufacturerSource');
+    clearManufacturerCache();
 
     res.status(200).json({
       success: true,

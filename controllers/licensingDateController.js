@@ -99,6 +99,7 @@ exports.createLicensingDate = async (req, res) => {
     });
 
     await updateLastUpdate('LicensingDate');
+    clearLicensingCache();
 
     res.status(201).json({
       success: true,
@@ -161,6 +162,7 @@ exports.updateLicensingDate = async (req, res) => {
     });
 
     await updateLastUpdate('LicensingDate');
+    clearLicensingCache();
 
     res.status(200).json({
       success: true,
@@ -210,6 +212,7 @@ exports.deleteLicensingDate = async (req, res) => {
     await LicensingDate.findByIdAndDelete(req.params.id);
 
     await updateLastUpdate('LicensingDate');
+    clearLicensingCache();
 
     res.status(200).json({
       success: true,

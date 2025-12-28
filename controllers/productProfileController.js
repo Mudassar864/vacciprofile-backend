@@ -1,6 +1,7 @@
 const ProductProfile = require('../models/ProductProfile');
 const mongoose = require('mongoose');
 const { updateLastUpdate } = require('./lastUpdateController');
+const { clearProductProfileCache } = require('../middleware/cacheHelper');
 
 // @desc    Get all product profiles
 // @route   GET /api/product-profiles
@@ -148,6 +149,7 @@ exports.createProductProfile = async (req, res) => {
     });
 
     await updateLastUpdate('ProductProfile');
+    clearProductProfileCache();
 
     res.status(201).json({
       success: true,
@@ -247,6 +249,7 @@ exports.updateProductProfile = async (req, res) => {
     });
 
     await updateLastUpdate('ProductProfile');
+    clearProductProfileCache();
 
     res.status(200).json({
       success: true,
@@ -306,6 +309,7 @@ exports.deleteProductProfile = async (req, res) => {
     await ProductProfile.findByIdAndDelete(req.params.id);
 
     await updateLastUpdate('ProductProfile');
+    clearProductProfileCache();
 
     res.status(200).json({
       success: true,

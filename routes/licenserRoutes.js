@@ -8,10 +8,11 @@ const {
   deleteLicenser,
 } = require('../controllers/licenserController');
 const { protect, authorize } = require('../middleware/auth');
+const { cacheMiddleware } = require('../middleware/cache');
 
-// GET routes - public access (no authentication)
-router.route('/').get(getLicensers);
-router.route('/:id').get(getLicenser);
+// GET routes - public access (no authentication) with caching
+router.route('/').get(cacheMiddleware(3600), getLicensers);
+router.route('/:id').get(cacheMiddleware(3600), getLicenser);
 
 // POST, PUT, DELETE routes - require authentication and admin role
 router.use(protect);

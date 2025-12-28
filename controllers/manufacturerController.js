@@ -7,6 +7,7 @@ const LicensingDate = require('../models/LicensingDate');
 const ProductProfile = require('../models/ProductProfile');
 const mongoose = require('mongoose');
 const { updateLastUpdate } = require('./lastUpdateController');
+const { clearManufacturerCache } = require('../middleware/cacheHelper');
 
 // @desc    Get all manufacturers
 // @route   GET /api/manufacturers
@@ -163,6 +164,7 @@ exports.createManufacturer = async (req, res) => {
     });
 
     await updateLastUpdate('Manufacturer');
+    clearManufacturerCache();
 
     res.status(201).json({
       success: true,
@@ -258,6 +260,7 @@ exports.updateManufacturer = async (req, res) => {
     });
 
     await updateLastUpdate('Manufacturer');
+    clearManufacturerCache();
 
     res.status(200).json({
       success: true,
@@ -322,6 +325,7 @@ exports.deleteManufacturer = async (req, res) => {
     await Manufacturer.findByIdAndDelete(req.params.id);
 
     await updateLastUpdate('Manufacturer');
+    clearManufacturerCache();
 
     res.status(200).json({
       success: true,

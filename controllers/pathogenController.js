@@ -6,6 +6,62 @@ const mongoose = require('mongoose');
 const { updateLastUpdate } = require('./lastUpdateController');
 const { clearPathogenCache } = require('../middleware/cacheHelper');
 
+// Helper function to generate search patterns for a pathogen name
+// Handles abbreviations, variations, and common aliases
+function generatePathogenSearchPatterns(pathogenName) {
+  const patterns = [];
+  const name = pathogenName.trim();
+  
+  // Add the full name as-is
+  patterns.push(name);
+  
+  // Extract abbreviation from parentheses (e.g., "Human Papilloma Virus (HPV)" -> "HPV")
+  const parenMatch = name.match(/\(([^)]+)\)/);
+  if (parenMatch) {
+    const abbreviation = parenMatch[1].trim();
+    patterns.push(abbreviation);
+    
+    // Also try without parentheses
+    const nameWithoutParens = name.replace(/\s*\([^)]+\)\s*/g, '').trim();
+    if (nameWithoutParens) {
+      patterns.push(nameWithoutParens);
+    }
+  }
+  
+  // Handle common variations
+  // Remove "Virus" suffix variations
+  const withoutVirus = name.replace(/\s*(virus|viruses)\s*/gi, '').trim();
+  if (withoutVirus && withoutVirus !== name) {
+    patterns.push(withoutVirus);
+  }
+  
+  // Handle specific known aliases and variations
+  const aliasMap = {
+    'human papilloma': ['HPV', 'Human Papillomavirus', 'Papillomavirus', 'Human Papilloma'],
+    'human papillomavirus': ['HPV', 'Human Papilloma Virus', 'Papillomavirus', 'Human Papilloma'],
+    'japanese encephalitis': ['JEV', 'Japanese Encephalitis'],
+    'monkeypox': ['MPV', 'MPXV', 'hMPXV', 'Monkey pox', 'Monkey Pox'],
+    'rabies': ['RabV', 'Rabies Virus', 'Rabies virus'],
+    'respiratory syncytial': ['RSV', 'Respiratory Syncytial'],
+    'severe acute respiratory syndrome coronavirus 2': ['SARS-CoV-2', 'SARS-CoV2', 'SARS-CoV 2', 'COVID-19', 'COVID19', 'SARS-CoV-2', 'SARS CoV-2', 'SARS CoV 2'],
+    'sars-cov-2': ['Severe Acute Respiratory Syndrome Coronavirus 2', 'COVID-19', 'COVID19', 'SARS-CoV2'],
+    'covid-19': ['Severe Acute Respiratory Syndrome Coronavirus 2', 'SARS-CoV-2', 'SARS-CoV2'],
+    'tick-borne encephalitis': ['TBE', 'Tick Borne Encephalitis', 'Tick-Borne Encephalitis'],
+    'varicella-zoster': ['VZV', 'Varicella Zoster Virus', 'Varicella-Zoster Virus', 'Chickenpox', 'Herpes Zoster', 'Varicella'],
+  };
+  
+  // Check for known aliases (case-insensitive partial matching)
+  const nameLower = name.toLowerCase();
+  for (const [key, aliases] of Object.entries(aliasMap)) {
+    if (nameLower.includes(key) || key.includes(nameLower)) {
+      patterns.push(...aliases);
+    }
+  }
+  
+  // Remove duplicates and empty strings
+  return [...new Set(patterns.filter(p => p && p.length > 0))];
+}
+
 // @desc    Get all pathogens
 // @route   GET /api/pathogens
 // @access  Private/Admin
@@ -279,10 +335,22 @@ exports.getPathogensPopulated = async (req, res) => {
 
     const formatted = await Promise.all(
       pathogens.map(async (p) => {
-        // Find vaccines where this pathogen name appears in pathogenNames
-        const vaccines = await Vaccine.find({
-          pathogenNames: { $regex: p.name, $options: 'i' },
-        }).sort({ name: 1 });
+        // Generate multiple search patterns to handle abbreviations and variations
+        const searchPatterns = generatePathogenSearchPatterns(p.name);
+        
+        // Build query to match any of the patterns
+        // Escape regex special characters in each pattern
+        const vaccineQuery = searchPatterns.length > 0 ? {
+          $or: searchPatterns.map(pattern => ({
+            pathogenNames: { $regex: pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' }
+          }))
+        } : {
+          // Fallback to simple match if no patterns generated
+          pathogenNames: { $regex: p.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' }
+        };
+        
+        // Find vaccines where any of the pathogen name patterns appear in pathogenNames
+        const vaccines = await Vaccine.find(vaccineQuery).sort({ name: 1 });
 
         // For each vaccine, get licensing dates (product profiles fetched on demand)
         const vaccinesFormatted = await Promise.all(
@@ -371,10 +439,22 @@ exports.getPathogenPopulated = async (req, res) => {
       });
     }
 
-    // Find vaccines where this pathogen name appears in pathogenNames
-    const vaccines = await Vaccine.find({
-      pathogenNames: { $regex: pathogen.name, $options: 'i' },
-    }).sort({ name: 1 });
+    // Generate multiple search patterns to handle abbreviations and variations
+    const searchPatterns = generatePathogenSearchPatterns(pathogen.name);
+    
+    // Build query to match any of the patterns
+    // Escape regex special characters in each pattern
+    const vaccineQuery = searchPatterns.length > 0 ? {
+      $or: searchPatterns.map(pattern => ({
+        pathogenNames: { $regex: pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' }
+      }))
+    } : {
+      // Fallback to simple match if no patterns generated
+      pathogenNames: { $regex: pathogen.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' }
+    };
+    
+    // Find vaccines where any of the pathogen name patterns appear in pathogenNames
+    const vaccines = await Vaccine.find(vaccineQuery).sort({ name: 1 });
 
     // For each vaccine, get licensing dates (product profiles fetched on demand)
     const vaccinesFormatted = await Promise.all(

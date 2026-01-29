@@ -1,6 +1,7 @@
 const LicensingDate = require('../models/LicensingDate');
 const mongoose = require('mongoose');
 const { updateLastUpdate } = require('./lastUpdateController');
+const { clearLicensingCache } = require('../middleware/cacheHelper');
 
 // @desc    Get all licensing dates
 // @route   GET /api/licensing-dates
@@ -89,13 +90,42 @@ exports.createLicensingDate = async (req, res) => {
   try {
     const { vaccineName, name, type, approvalDate, source, lastUpdateOnVaccine } = req.body;
 
+    // Validate required fields
+    if (!vaccineName || typeof vaccineName !== 'string' || !vaccineName.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Vaccine name is required',
+      });
+    }
+
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Licensing authority name is required',
+      });
+    }
+
+    if (!approvalDate || typeof approvalDate !== 'string' || !approvalDate.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Approval date is required',
+      });
+    }
+
+    if (!source || typeof source !== 'string' || !source.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Source URL is required',
+      });
+    }
+
     const licensingDate = await LicensingDate.create({
       vaccineName: vaccineName.trim(),
       name: name.trim(),
-      type: type ? type.trim() : 'N/A',
+      type: type && typeof type === 'string' && type.trim() ? type.trim() : 'N/A',
       approvalDate: approvalDate.trim(),
       source: source.trim(),
-      lastUpdateOnVaccine: lastUpdateOnVaccine ? lastUpdateOnVaccine.trim() : 'N/A',
+      lastUpdateOnVaccine: lastUpdateOnVaccine && typeof lastUpdateOnVaccine === 'string' && lastUpdateOnVaccine.trim() ? lastUpdateOnVaccine.trim() : 'N/A',
     });
 
     await updateLastUpdate('LicensingDate');
@@ -149,12 +179,48 @@ exports.updateLicensingDate = async (req, res) => {
     }
 
     const updateData = {};
-    if (vaccineName !== undefined) updateData.vaccineName = vaccineName.trim();
-    if (name !== undefined) updateData.name = name.trim();
-    if (type !== undefined) updateData.type = type.trim();
-    if (approvalDate !== undefined) updateData.approvalDate = approvalDate.trim();
-    if (source !== undefined) updateData.source = source.trim();
-    if (lastUpdateOnVaccine !== undefined) updateData.lastUpdateOnVaccine = lastUpdateOnVaccine.trim();
+    if (vaccineName !== undefined && vaccineName !== null) {
+      if (typeof vaccineName !== 'string' || !vaccineName.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Vaccine name cannot be empty',
+        });
+      }
+      updateData.vaccineName = vaccineName.trim();
+    }
+    if (name !== undefined && name !== null) {
+      if (typeof name !== 'string' || !name.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Licensing authority name cannot be empty',
+        });
+      }
+      updateData.name = name.trim();
+    }
+    if (type !== undefined && type !== null) {
+      updateData.type = typeof type === 'string' && type.trim() ? type.trim() : 'N/A';
+    }
+    if (approvalDate !== undefined && approvalDate !== null) {
+      if (typeof approvalDate !== 'string' || !approvalDate.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Approval date cannot be empty',
+        });
+      }
+      updateData.approvalDate = approvalDate.trim();
+    }
+    if (source !== undefined && source !== null) {
+      if (typeof source !== 'string' || !source.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Source URL cannot be empty',
+        });
+      }
+      updateData.source = source.trim();
+    }
+    if (lastUpdateOnVaccine !== undefined && lastUpdateOnVaccine !== null) {
+      updateData.lastUpdateOnVaccine = typeof lastUpdateOnVaccine === 'string' && lastUpdateOnVaccine.trim() ? lastUpdateOnVaccine.trim() : 'N/A';
+    }
 
     licensingDate = await LicensingDate.findByIdAndUpdate(req.params.id, updateData, {
       new: true,

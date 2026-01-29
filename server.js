@@ -15,12 +15,17 @@ const app = express();
 
 // Middleware
 // CORS configuration - allow multiple origins
+// Vaccines, candidates, manufacturers, nitags, compare are fetched SERVER-SIDE (page.tsx)
+// so no CORS. Product profiles & licensing dates are fetched CLIENT-SIDE (on click) so CORS applies.
 const allowedOrigins = [
   process.env.FRONTEND_URL || 'http://localhost:3001',
   process.env.PORTAL_URL || 'http://localhost:3001',
   'http://localhost:3000',
   'http://localhost:3001',
   'http://localhost:3002',
+  'https://vacciprofile.vercel.app',
+  'https://www.vacciprofile.vercel.app',
+  'http://yewu.asia'
 ];
 
 app.use(cors({

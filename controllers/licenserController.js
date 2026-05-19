@@ -1,14 +1,20 @@
 const Licenser = require('../models/Licenser');
 const mongoose = require('mongoose');
 const { updateLastUpdate } = require('./lastUpdateController');
-const { clearLicenserCache } = require('../middleware/cacheHelper');
+const { parsePaginationQuery, paginateQuery } = require('../utils/pagination');
 
 // @desc    Get all licensers
 // @route   GET /api/licensers
 // @access  Private/Admin
 exports.getLicensers = async (req, res) => {
   try {
-    const licensers = await Licenser.find().sort({ acronym: 1 });
+    const pagination = parsePaginationQuery(req.query);
+    const { docs: licensers, total, pagination: paginationMeta } = await paginateQuery(
+      Licenser,
+      {},
+      { acronym: 1 },
+      pagination
+    );
 
     const formatted = licensers.map((l) => ({
       id: l._id.toString(),
@@ -22,11 +28,14 @@ exports.getLicensers = async (req, res) => {
       updatedAt: l.updatedAt,
     }));
 
-    res.status(200).json({
+    const payload = {
       success: true,
-      count: formatted.length,
+      count: pagination.enabled ? total : formatted.length,
       licensers: formatted,
-    });
+    };
+    if (paginationMeta) payload.pagination = paginationMeta;
+
+    res.status(200).json(payload);
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -114,7 +123,6 @@ exports.createLicenser = async (req, res) => {
     });
 
     await updateLastUpdate('Licenser');
-    clearLicenserCache();
 
     res.status(201).json({
       success: true,
@@ -195,7 +203,6 @@ exports.updateLicenser = async (req, res) => {
     });
 
     await updateLastUpdate('Licenser');
-    clearLicenserCache();
 
     res.status(200).json({
       success: true,
@@ -245,7 +252,6 @@ exports.deleteLicenser = async (req, res) => {
     await Licenser.findByIdAndDelete(req.params.id);
 
     await updateLastUpdate('Licenser');
-    clearLicenserCache();
 
     res.status(200).json({
       success: true,

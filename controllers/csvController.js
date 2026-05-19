@@ -1,5 +1,5 @@
 const Vaccine = require('../models/Vaccine');
-const LicensingDate = require('../models/LicensingDate');
+const LicensingAuthority = require('../models/LicensingAuthority');
 const ProductProfile = require('../models/ProductProfile');
 const Manufacturer = require('../models/Manufacturer');
 const ManufacturerProduct = require('../models/ManufacturerProduct');
@@ -11,6 +11,22 @@ const Licenser = require('../models/Licenser');
 const { parse } = require('csv-parse');
 const { stringify } = require('csv-stringify');
 const { updateLastUpdate } = require('./lastUpdateController');
+const {
+  createImportProgress,
+  respondImport,
+  respondImportError,
+} = require('../utils/csvImportStream');
+
+function importProgressStats(results) {
+  let imported = Array.isArray(results.success) ? results.success.length : 0;
+  if (Array.isArray(results.updated)) {
+    imported += results.updated.length;
+  }
+  return {
+    imported,
+    errors: Array.isArray(results.errors) ? results.errors.length : 0,
+  };
+}
 
 // Helper function to parse CSV with proper UTF-8 encoding handling
 const parseCSV = async (buffer) => {
@@ -45,6 +61,7 @@ const parseCSV = async (buffer) => {
 // @route   POST /api/csv/import/vaccines
 // @access  Private/Admin
 exports.importVaccines = async (req, res) => {
+  let progress;
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -54,6 +71,10 @@ exports.importVaccines = async (req, res) => {
     }
 
     const records = await parseCSV(req.file.buffer);
+    progress = createImportProgress(req, res, {
+      total: records.length,
+      fileSize: req.file.size,
+    });
 
     // Helper function to merge comma-separated strings without duplicates
     const mergeStringArrays = (existingStr, newStr) => {
@@ -80,7 +101,8 @@ exports.importVaccines = async (req, res) => {
       console.log('First record sample:', JSON.stringify(records[0], null, 2));
     }
 
-    for (const record of records) {
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
       try {
         // Use exact column name from CSV (should be 'name' based on your CSV)
         // Normalize Unicode to ensure special characters like ® are handled correctly
@@ -272,6 +294,7 @@ exports.importVaccines = async (req, res) => {
           error: errorMessage,
         });
       }
+      progress.tick(i, importProgressStats(results));
     }
 
     const totalProcessed = results.success.length + results.updated.length;
@@ -292,7 +315,7 @@ exports.importVaccines = async (req, res) => {
       await updateLastUpdate('Vaccine');
     }
 
-    res.status(200).json({
+    respondImport(res, progress, {
       success: true,
       message: `Processed ${totalProcessed} vaccines successfully (${results.success.length} created/new, ${results.updated.length} updated)`,
       imported: results.success.length,
@@ -302,6 +325,9 @@ exports.importVaccines = async (req, res) => {
     });
   } catch (error) {
     console.error('Server error in importVaccines:', error);
+    if (typeof progress !== 'undefined' && progress.fail(error.message)) {
+      return;
+    }
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -341,10 +367,11 @@ exports.exportVaccines = async (req, res) => {
   }
 };
 
-// @desc    Import licensing dates from CSV
-// @route   POST /api/csv/import/licensing-dates
+// @desc    Import licensing authorities from CSV
+// @route   POST /api/csv/import/licensing-authorities
 // @access  Private/Admin
-exports.importLicensingDates = async (req, res) => {
+exports.importLicensingAuthorities = async (req, res) => {
+  let progress;
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -354,83 +381,126 @@ exports.importLicensingDates = async (req, res) => {
     }
 
     const records = await parseCSV(req.file.buffer);
+    progress = createImportProgress(req, res, {
+      total: records.length,
+      fileSize: req.file.size,
+    });
 
     const results = {
       success: [],
       errors: [],
+      created: 0,
+      updated: 0,
     };
 
-    for (const record of records) {
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
       try {
-        // Handle lastUpdateOnVaccine - preserve the value from CSV if it exists
-        // Support both 'lastUpdateOnVaccine' and 'lastUpdated' column names
-        // Only default to 'N/A' if the field is truly missing or empty
-        const lastUpdateValue = record.lastUpdateOnVaccine !== undefined ? record.lastUpdateOnVaccine : record.lastUpdated;
-        const lastUpdate = (lastUpdateValue !== undefined && lastUpdateValue !== null && String(lastUpdateValue).trim() !== '' && String(lastUpdateValue).trim().toUpperCase() !== 'N/A')
-          ? String(lastUpdateValue).trim()
-          : 'N/A';
+        const vaccineName =
+          record.vaccineName != null && String(record.vaccineName).trim() !== ''
+            ? String(record.vaccineName).trim()
+            : '';
+        const regulatory_authority_or_country =
+          record.regulatory_authority_or_country != null &&
+          String(record.regulatory_authority_or_country).trim() !== ''
+            ? String(record.regulatory_authority_or_country).trim()
+            : '';
 
-        // Handle type field similarly
-        const type = (record.type !== undefined && record.type !== null && String(record.type).trim() !== '')
-          ? String(record.type).trim()
-          : 'N/A';
+        const type =
+          record.type != null && String(record.type).trim() !== ''
+            ? String(record.type).trim()
+            : 'N/A';
 
-        // Handle approvalDate - validate and trim, reject if empty or 'N/A' since it's required
-        const approvalDate = (record.approvalDate !== undefined && record.approvalDate !== null && String(record.approvalDate).trim() !== '' && String(record.approvalDate).trim().toUpperCase() !== 'N/A')
-          ? String(record.approvalDate).trim()
-          : null;
+        const approvalDate =
+          record.approvalDate != null &&
+          String(record.approvalDate).trim() !== '' &&
+          String(record.approvalDate).trim().toUpperCase() !== 'N/A'
+            ? String(record.approvalDate).trim()
+            : null;
+
+        const source =
+          record.source != null && String(record.source).trim() !== ''
+            ? String(record.source).trim()
+            : null;
+
+        const approval_route =
+          record.approval_route != null && String(record.approval_route).trim() !== ''
+            ? String(record.approval_route).trim()
+            : 'N/A';
+
+        const market_status =
+          record.market_status != null && String(record.market_status).trim() !== ''
+            ? String(record.market_status).trim()
+            : 'N/A';
+
+        if (!vaccineName) {
+          results.errors.push({
+            vaccineName: 'Unknown',
+            error: 'vaccineName is required',
+          });
+          continue;
+        }
+
+        if (!regulatory_authority_or_country) {
+          results.errors.push({
+            vaccineName,
+            error: 'regulatory_authority_or_country is required',
+          });
+          continue;
+        }
 
         if (!approvalDate) {
           results.errors.push({
-            vaccineName: record.vaccineName || 'Unknown',
+            vaccineName,
             error: 'Approval date is required and cannot be empty or N/A',
           });
           continue;
         }
 
-        // Handle source - validate and trim since it's required
-        const source = (record.source !== undefined && record.source !== null && String(record.source).trim() !== '')
-          ? String(record.source).trim()
-          : null;
-
         if (!source) {
           results.errors.push({
-            vaccineName: record.vaccineName || 'Unknown',
+            vaccineName,
             error: 'Source is required and cannot be empty',
           });
           continue;
         }
 
-        const licensingDate = await LicensingDate.create({
-          vaccineName: record.vaccineName,
-          name: record.name,
-          type: type,
-          approvalDate: approvalDate,
-          source: source,
-          lastUpdateOnVaccine: lastUpdate,
+        const licensingAuthority = await LicensingAuthority.create({
+          vaccineName,
+          regulatory_authority_or_country,
+          type,
+          approvalDate,
+          source,
+          approval_route,
+          market_status,
         });
-        results.success.push(`${licensingDate.vaccineName} - ${licensingDate.name}`);
+        results.success.push(
+          `${licensingAuthority.vaccineName} - ${licensingAuthority.regulatory_authority_or_country}`
+        );
       } catch (error) {
         results.errors.push({
           vaccineName: record.vaccineName || 'Unknown',
           error: error.message,
         });
       }
+      progress.tick(i, importProgressStats(results));
     }
 
-    // Update last update time if any licensing dates were imported
     if (results.success.length > 0) {
-      await updateLastUpdate('LicensingDate');
+      await updateLastUpdate('LicensingAuthority');
     }
 
-    res.status(200).json({
+    respondImport(res, progress, {
       success: true,
-      message: `Imported ${results.success.length} licensing dates successfully`,
+      message: `Imported ${results.success.length} licensing authorities successfully`,
       imported: results.success.length,
       errors: results.errors.length,
       details: results,
     });
   } catch (error) {
+    if (progress && progress.fail(error.message)) {
+      return;
+    }
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -439,23 +509,24 @@ exports.importLicensingDates = async (req, res) => {
   }
 };
 
-// @desc    Export licensing dates to CSV
-// @route   GET /api/csv/export/licensing-dates
+// @desc    Export licensing authorities to CSV
+// @route   GET /api/csv/export/licensing-authorities
 // @access  Private/Admin
-exports.exportLicensingDates = async (req, res) => {
+exports.exportLicensingAuthorities = async (req, res) => {
   try {
-    const licensingDates = await LicensingDate.find().sort({ vaccineName: 1 });
+    const licensingAuthorities = await LicensingAuthority.find().sort({ vaccineName: 1 });
 
     const csvData = await new Promise((resolve, reject) => {
-      stringify(licensingDates, {
+      stringify(licensingAuthorities, {
         header: true,
         columns: [
           'vaccineName',
-          'name',
+          'regulatory_authority_or_country',
           'type',
-          'approvalDate',
           'source',
-          'lastUpdateOnVaccine',
+          'approvalDate',
+          'approval_route',
+          'market_status',
         ],
       }, (err, output) => {
         if (err) reject(err);
@@ -464,7 +535,7 @@ exports.exportLicensingDates = async (req, res) => {
     });
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename=licensing-dates.csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=licensing-authorities.csv');
     // Send with UTF-8 BOM to ensure Excel and other tools recognize UTF-8 encoding
     res.send('\ufeff' + csvData);
   } catch (error) {
@@ -480,6 +551,7 @@ exports.exportLicensingDates = async (req, res) => {
 // @route   POST /api/csv/import/product-profiles
 // @access  Private/Admin
 exports.importProductProfiles = async (req, res) => {
+  let progress;
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -489,13 +561,18 @@ exports.importProductProfiles = async (req, res) => {
     }
 
     const records = await parseCSV(req.file.buffer);
+    progress = createImportProgress(req, res, {
+      total: records.length,
+      fileSize: req.file.size,
+    });
 
     const results = {
       success: [],
       errors: [],
     };
 
-    for (const record of records) {
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
       try {
         // Helper function to handle default values - only use default if field is truly empty
         const getValue = (value, defaultValue) => {
@@ -504,10 +581,19 @@ exports.importProductProfiles = async (req, res) => {
             : defaultValue;
         };
 
-        const productProfile = await ProductProfile.create({
-          vaccineName: record.vaccineName,
-          type: record.type,
-          name: record.name,
+        const vaccineNameTrim =
+          record.vaccineName !== undefined && record.vaccineName !== null
+            ? String(record.vaccineName).trim()
+            : '';
+        const typeTrim =
+          record.type !== undefined && record.type !== null ? String(record.type).trim() : '';
+        const nameTrim =
+          record.name !== undefined && record.name !== null ? String(record.name).trim() : '';
+
+        const doc = {
+          vaccineName: vaccineNameTrim,
+          type: typeTrim,
+          name: nameTrim,
           composition: getValue(record.composition, '- not licensed yet -'),
           strainCoverage: getValue(record.strainCoverage, '- not licensed yet -'),
           indication: getValue(record.indication, '- not licensed yet -'),
@@ -521,7 +607,26 @@ exports.importProductProfiles = async (req, res) => {
           safety: getValue(record.safety, '- not licensed yet -'),
           vaccinationGoal: getValue(record.vaccinationGoal, '- not licensed yet -'),
           others: getValue(record.others, '- not licensed yet -'),
+        };
+
+        const existing = await ProductProfile.findOne({
+          vaccineName: vaccineNameTrim,
+          type: typeTrim,
         });
+
+        let productProfile;
+        if (existing) {
+          productProfile = await ProductProfile.findByIdAndUpdate(
+            existing._id,
+            { $set: doc },
+            { new: true, runValidators: true }
+          );
+          results.updated += 1;
+        } else {
+          productProfile = await ProductProfile.create(doc);
+          results.created += 1;
+        }
+
         results.success.push(`${productProfile.vaccineName} - ${productProfile.type}`);
       } catch (error) {
         results.errors.push({
@@ -529,6 +634,7 @@ exports.importProductProfiles = async (req, res) => {
           error: error.message,
         });
       }
+      progress.tick(i, importProgressStats(results));
     }
 
     // Update last update time if any product profiles were imported
@@ -536,14 +642,19 @@ exports.importProductProfiles = async (req, res) => {
       await updateLastUpdate('ProductProfile');
     }
 
-    res.status(200).json({
+    respondImport(res, progress, {
       success: true,
-      message: `Imported ${results.success.length} product profiles successfully`,
+      message: `Processed ${results.success.length} product profiles successfully`,
       imported: results.success.length,
+      created: results.created,
+      updated: results.updated,
       errors: results.errors.length,
       details: results,
     });
   } catch (error) {
+    if (progress && progress.fail(error.message)) {
+      return;
+    }
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -603,6 +714,7 @@ exports.exportProductProfiles = async (req, res) => {
 // @route   POST /api/csv/import/manufacturers
 // @access  Private/Admin
 exports.importManufacturers = async (req, res) => {
+  let progress;
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -612,13 +724,18 @@ exports.importManufacturers = async (req, res) => {
     }
 
     const records = await parseCSV(req.file.buffer);
+    progress = createImportProgress(req, res, {
+      total: records.length,
+      fileSize: req.file.size,
+    });
 
     const results = {
       success: [],
       errors: [],
     };
 
-    for (const record of records) {
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
       try {
         const manufacturer = await Manufacturer.create({
           name: record.name.trim(),
@@ -646,6 +763,7 @@ exports.importManufacturers = async (req, res) => {
           error: error.message,
         });
       }
+      progress.tick(i, importProgressStats(results));
     }
 
     // Update last update time if any manufacturers were imported
@@ -653,7 +771,7 @@ exports.importManufacturers = async (req, res) => {
       await updateLastUpdate('Manufacturer');
     }
 
-    res.status(200).json({
+    respondImport(res, progress, {
       success: true,
       message: `Imported ${results.success.length} manufacturers successfully`,
       imported: results.success.length,
@@ -661,6 +779,9 @@ exports.importManufacturers = async (req, res) => {
       details: results,
     });
   } catch (error) {
+    if (progress && progress.fail(error.message)) {
+      return;
+    }
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -721,6 +842,7 @@ exports.exportManufacturers = async (req, res) => {
 // @route   POST /api/csv/import/manufacturer-products
 // @access  Private/Admin
 exports.importManufacturerProducts = async (req, res) => {
+  let progress;
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -730,13 +852,18 @@ exports.importManufacturerProducts = async (req, res) => {
     }
 
     const records = await parseCSV(req.file.buffer);
+    progress = createImportProgress(req, res, {
+      total: records.length,
+      fileSize: req.file.size,
+    });
 
     const results = {
       success: [],
       errors: [],
     };
 
-    for (const record of records) {
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
       try {
         const product = await ManufacturerProduct.create({
           manufacturerName: record.manufacturerName.trim(),
@@ -750,6 +877,7 @@ exports.importManufacturerProducts = async (req, res) => {
           error: error.message,
         });
       }
+      progress.tick(i, importProgressStats(results));
     }
 
     // Update last update time if any manufacturer products were imported
@@ -757,7 +885,7 @@ exports.importManufacturerProducts = async (req, res) => {
       await updateLastUpdate('ManufacturerProduct');
     }
 
-    res.status(200).json({
+    respondImport(res, progress, {
       success: true,
       message: `Imported ${results.success.length} manufacturer products successfully`,
       imported: results.success.length,
@@ -765,6 +893,9 @@ exports.importManufacturerProducts = async (req, res) => {
       details: results,
     });
   } catch (error) {
+    if (progress && progress.fail(error.message)) {
+      return;
+    }
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -807,6 +938,7 @@ exports.exportManufacturerProducts = async (req, res) => {
 // @route   POST /api/csv/import/manufacturer-sources
 // @access  Private/Admin
 exports.importManufacturerSources = async (req, res) => {
+  let progress;
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -816,13 +948,18 @@ exports.importManufacturerSources = async (req, res) => {
     }
 
     const records = await parseCSV(req.file.buffer);
+    progress = createImportProgress(req, res, {
+      total: records.length,
+      fileSize: req.file.size,
+    });
 
     const results = {
       success: [],
       errors: [],
     };
 
-    for (const record of records) {
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
       try {
         const source = await ManufacturerSource.create({
           manufacturerName: record.manufacturerName.trim(),
@@ -837,6 +974,7 @@ exports.importManufacturerSources = async (req, res) => {
           error: error.message,
         });
       }
+      progress.tick(i, importProgressStats(results));
     }
 
     // Update last update time if any manufacturer sources were imported
@@ -844,7 +982,7 @@ exports.importManufacturerSources = async (req, res) => {
       await updateLastUpdate('ManufacturerSource');
     }
 
-    res.status(200).json({
+    respondImport(res, progress, {
       success: true,
       message: `Imported ${results.success.length} manufacturer sources successfully`,
       imported: results.success.length,
@@ -852,6 +990,9 @@ exports.importManufacturerSources = async (req, res) => {
       details: results,
     });
   } catch (error) {
+    if (progress && progress.fail(error.message)) {
+      return;
+    }
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -894,6 +1035,7 @@ exports.exportManufacturerSources = async (req, res) => {
 // @route   POST /api/csv/import/pathogens
 // @access  Private/Admin
 exports.importPathogens = async (req, res) => {
+  let progress;
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -903,13 +1045,18 @@ exports.importPathogens = async (req, res) => {
     }
 
     const records = await parseCSV(req.file.buffer);
+    progress = createImportProgress(req, res, {
+      total: records.length,
+      fileSize: req.file.size,
+    });
 
     const results = {
       success: [],
       errors: [],
     };
 
-    for (const record of records) {
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
       try {
         const pathogen = await Pathogen.create({
           name: record.name.trim(),
@@ -927,6 +1074,7 @@ exports.importPathogens = async (req, res) => {
           error: error.message,
         });
       }
+      progress.tick(i, importProgressStats(results));
     }
 
     // Update last update time if any pathogens were imported
@@ -934,7 +1082,7 @@ exports.importPathogens = async (req, res) => {
       await updateLastUpdate('Pathogen');
     }
 
-    res.status(200).json({
+    respondImport(res, progress, {
       success: true,
       message: `Imported ${results.success.length} pathogens successfully`,
       imported: results.success.length,
@@ -942,6 +1090,9 @@ exports.importPathogens = async (req, res) => {
       details: results,
     });
   } catch (error) {
+    if (progress && progress.fail(error.message)) {
+      return;
+    }
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -992,6 +1143,7 @@ exports.exportPathogens = async (req, res) => {
 // @route   POST /api/csv/import/manufacturer-candidates
 // @access  Private/Admin
 exports.importManufacturerCandidates = async (req, res) => {
+  let progress;
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -1001,13 +1153,18 @@ exports.importManufacturerCandidates = async (req, res) => {
     }
 
     const records = await parseCSV(req.file.buffer);
+    progress = createImportProgress(req, res, {
+      total: records.length,
+      fileSize: req.file.size,
+    });
 
     const results = {
       success: [],
       errors: [],
     };
 
-    for (const record of records) {
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
       try {
         const candidate = await ManufacturerCandidate.create({
           pathogenName: record.pathogenName.trim(),
@@ -1025,6 +1182,7 @@ exports.importManufacturerCandidates = async (req, res) => {
           error: error.message,
         });
       }
+      progress.tick(i, importProgressStats(results));
     }
 
     // Update last update time if any manufacturer candidates were imported
@@ -1032,7 +1190,7 @@ exports.importManufacturerCandidates = async (req, res) => {
       await updateLastUpdate('ManufacturerCandidate');
     }
 
-    res.status(200).json({
+    respondImport(res, progress, {
       success: true,
       message: `Imported ${results.success.length} manufacturer candidates successfully`,
       imported: results.success.length,
@@ -1040,6 +1198,9 @@ exports.importManufacturerCandidates = async (req, res) => {
       details: results,
     });
   } catch (error) {
+    if (progress && progress.fail(error.message)) {
+      return;
+    }
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -1082,6 +1243,7 @@ exports.exportManufacturerCandidates = async (req, res) => {
 // @route   POST /api/csv/import/nitags
 // @access  Private/Admin
 exports.importNITAGs = async (req, res) => {
+  let progress;
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -1091,13 +1253,18 @@ exports.importNITAGs = async (req, res) => {
     }
 
     const records = await parseCSV(req.file.buffer);
+    progress = createImportProgress(req, res, {
+      total: records.length,
+      fileSize: req.file.size,
+    });
 
     const results = {
       success: [],
       errors: [],
     };
 
-    for (const record of records) {
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
       try {
         const nitag = await NITAG.create({
           country: record.country.trim(),
@@ -1114,6 +1281,7 @@ exports.importNITAGs = async (req, res) => {
           error: error.message,
         });
       }
+      progress.tick(i, importProgressStats(results));
     }
 
     // Update last update time if any NITAGs were imported
@@ -1121,7 +1289,7 @@ exports.importNITAGs = async (req, res) => {
       await updateLastUpdate('NITAG');
     }
 
-    res.status(200).json({
+    respondImport(res, progress, {
       success: true,
       message: `Imported ${results.success.length} NITAGs successfully`,
       imported: results.success.length,
@@ -1129,6 +1297,9 @@ exports.importNITAGs = async (req, res) => {
       details: results,
     });
   } catch (error) {
+    if (progress && progress.fail(error.message)) {
+      return;
+    }
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -1171,6 +1342,7 @@ exports.exportNITAGs = async (req, res) => {
 // @route   POST /api/csv/import/licensers
 // @access  Private/Admin
 exports.importLicensers = async (req, res) => {
+  let progress;
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -1180,13 +1352,18 @@ exports.importLicensers = async (req, res) => {
     }
 
     const records = await parseCSV(req.file.buffer);
+    progress = createImportProgress(req, res, {
+      total: records.length,
+      fileSize: req.file.size,
+    });
 
     const results = {
       success: [],
       errors: [],
     };
 
-    for (const record of records) {
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
       try {
         const licenser = await Licenser.create({
           acronym: record.acronym.trim(),
@@ -1203,6 +1380,7 @@ exports.importLicensers = async (req, res) => {
           error: error.message,
         });
       }
+      progress.tick(i, importProgressStats(results));
     }
 
     // Update last update time if any licensers were imported
@@ -1210,7 +1388,7 @@ exports.importLicensers = async (req, res) => {
       await updateLastUpdate('Licenser');
     }
 
-    res.status(200).json({
+    respondImport(res, progress, {
       success: true,
       message: `Imported ${results.success.length} licensers successfully`,
       imported: results.success.length,
@@ -1218,6 +1396,9 @@ exports.importLicensers = async (req, res) => {
       details: results,
     });
   } catch (error) {
+    if (progress && progress.fail(error.message)) {
+      return;
+    }
     res.status(500).json({
       success: false,
       message: 'Server error',

@@ -6,13 +6,14 @@ const {
   createManufacturerCandidate,
   updateManufacturerCandidate,
   deleteManufacturerCandidate,
+  getManufacturerCandidatesTempFullTree,
 } = require('../controllers/manufacturerCandidateController');
 const { protect, authorize } = require('../middleware/auth');
-const { cacheMiddleware } = require('../middleware/cache');
 
-// GET routes - public access (no authentication) with caching
-router.route('/').get(cacheMiddleware(3600), getManufacturerCandidates);
-router.route('/:id').get(cacheMiddleware(3600), getManufacturerCandidate);
+// GET routes - public access (no authentication)
+router.route('/temp-full-tree').get(getManufacturerCandidatesTempFullTree);
+router.route('/').get(getManufacturerCandidates);
+router.route('/:id').get(getManufacturerCandidate);
 
 // POST, PUT, DELETE routes - require authentication and admin role
 router.use(protect);

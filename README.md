@@ -71,11 +71,11 @@ Base URL: `http://localhost:3000/api`
 
 | Method | Endpoint | Description | Access |
 |--------|----------|-------------|--------|
-| GET | `/licensing-dates` | Get all licensing dates | Admin |
-| POST | `/licensing-dates` | Create new licensing date | Admin |
-| GET | `/licensing-dates/:id` | Get licensing date by ID | Admin |
-| PUT | `/licensing-dates/:id` | Update licensing date | Admin |
-| DELETE | `/licensing-dates/:id` | Delete licensing date | Admin |
+| GET | `/licensing-authorities` | Get all licensing authorities | Admin |
+| POST | `/licensing-authorities` | Create new licensing authority | Admin |
+| GET | `/licensing-authorities/:id` | Get licensing authority by ID | Admin |
+| PUT | `/licensing-authorities/:id` | Update licensing authority | Admin |
+| DELETE | `/licensing-authorities/:id` | Delete licensing authority | Admin |
 
 ### Product Profiles (Admin Only)
 

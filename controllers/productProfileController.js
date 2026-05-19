@@ -1,7 +1,7 @@
 const ProductProfile = require('../models/ProductProfile');
 const mongoose = require('mongoose');
 const { updateLastUpdate } = require('./lastUpdateController');
-const { clearProductProfileCache } = require('../middleware/cacheHelper');
+const { parsePaginationQuery, paginateQuery } = require('../utils/pagination');
 
 // @desc    Get all product profiles
 // @route   GET /api/product-profiles
@@ -13,7 +13,13 @@ exports.getProductProfiles = async (req, res) => {
     if (vaccineName) query.vaccineName = vaccineName;
     if (type) query.type = type;
 
-    const productProfiles = await ProductProfile.find(query).sort({ vaccineName: 1, type: 1 });
+    const pagination = parsePaginationQuery(req.query);
+    const { docs: productProfiles, total, pagination: paginationMeta } = await paginateQuery(
+      ProductProfile,
+      query,
+      { vaccineName: 1, type: 1 },
+      pagination
+    );
 
     const formatted = productProfiles.map((item) => ({
       id: item._id.toString(),
@@ -37,11 +43,14 @@ exports.getProductProfiles = async (req, res) => {
       updatedAt: item.updatedAt,
     }));
 
-    res.status(200).json({
+    const payload = {
       success: true,
-      count: formatted.length,
+      count: pagination.enabled ? total : formatted.length,
       productProfiles: formatted,
-    });
+    };
+    if (paginationMeta) payload.pagination = paginationMeta;
+
+    res.status(200).json(payload);
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -149,7 +158,6 @@ exports.createProductProfile = async (req, res) => {
     });
 
     await updateLastUpdate('ProductProfile');
-    clearProductProfileCache();
 
     res.status(201).json({
       success: true,
@@ -249,7 +257,6 @@ exports.updateProductProfile = async (req, res) => {
     });
 
     await updateLastUpdate('ProductProfile');
-    clearProductProfileCache();
 
     res.status(200).json({
       success: true,
@@ -309,7 +316,6 @@ exports.deleteProductProfile = async (req, res) => {
     await ProductProfile.findByIdAndDelete(req.params.id);
 
     await updateLastUpdate('ProductProfile');
-    clearProductProfileCache();
 
     res.status(200).json({
       success: true,

@@ -16,7 +16,7 @@ const app = express();
 // Middleware
 // CORS configuration - allow multiple origins
 // Vaccines, candidates, manufacturers, nitags, compare are fetched SERVER-SIDE (page.tsx)
-// so no CORS. Product profiles & licensing dates are fetched CLIENT-SIDE (on click) so CORS applies.
+// so no CORS. Product profiles & licensing authorities are fetched CLIENT-SIDE (on click) so CORS applies.
 const allowedOrigins = [
   process.env.FRONTEND_URL || 'http://localhost:3001',
   process.env.PORTAL_URL || 'http://localhost:3001',
@@ -63,7 +63,7 @@ if (process.env.NODE_ENV === 'development') {
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/vaccines', require('./routes/vaccineRoutes'));
-app.use('/api/licensing-dates', require('./routes/licensingDateRoutes'));
+app.use('/api/licensing-authorities', require('./routes/licensingAuthorityRoutes'));
 app.use('/api/product-profiles', require('./routes/productProfileRoutes'));
 app.use('/api/manufacturers', require('./routes/manufacturerRoutes'));
 app.use('/api/manufacturer-products', require('./routes/manufacturerProductRoutes'));
@@ -98,6 +98,7 @@ app.get('/', (req, res) => {
     pathogens: [
       '/api/pathogens',
       '/api/pathogens/populated',
+      '/api/pathogens/temp-full-tree',
       '/api/pathogens/:id',
       '/api/pathogens/:id/populated',
     ],
@@ -107,9 +108,11 @@ app.get('/', (req, res) => {
       '/api/manufacturers/:id',
       '/api/manufacturers/:id/populated',
     ],
-    licensingDates: [
-      '/api/licensing-dates',
-      '/api/licensing-dates/:id',
+    licensingAuthorities: [
+      '/api/licensing-authorities',
+      '/api/licensing-authorities/stats/unique-licenser-names',
+      '/api/licensing-authorities/vaccines-for-authority',
+      '/api/licensing-authorities/:id',
     ],
     productProfiles: [
       '/api/product-profiles',
@@ -125,10 +128,12 @@ app.get('/', (req, res) => {
     ],
     manufacturerCandidates: [
       '/api/manufacturer-candidates',
+      '/api/manufacturer-candidates/temp-full-tree',
       '/api/manufacturer-candidates/:id',
     ],
     nitags: [
       '/api/nitags',
+      '/api/nitags/temp-full-tree',
       '/api/nitags/:id',
     ],
     licensers: [

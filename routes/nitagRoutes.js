@@ -6,13 +6,14 @@ const {
   createNITAG,
   updateNITAG,
   deleteNITAG,
+  getNITAGsTempFullTree,
 } = require('../controllers/nitagController');
 const { protect, authorize } = require('../middleware/auth');
-const { cacheMiddleware } = require('../middleware/cache');
 
-// GET routes - public access (no authentication) with caching
-router.route('/').get(cacheMiddleware(3600), getNITAGs);
-router.route('/:id').get(cacheMiddleware(3600), getNITAG);
+// GET routes - public access (no authentication)
+router.route('/temp-full-tree').get(getNITAGsTempFullTree);
+router.route('/').get(getNITAGs);
+router.route('/:id').get(getNITAG);
 
 // POST, PUT, DELETE routes - require authentication and admin role
 router.use(protect);

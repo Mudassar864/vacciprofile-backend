@@ -3,18 +3,25 @@ const ManufacturerProduct = require('../models/ManufacturerProduct');
 const ManufacturerSource = require('../models/ManufacturerSource');
 const ManufacturerCandidate = require('../models/ManufacturerCandidate');
 const Vaccine = require('../models/Vaccine');
-const LicensingDate = require('../models/LicensingDate');
+const LicensingAuthority = require('../models/LicensingAuthority');
 const ProductProfile = require('../models/ProductProfile');
 const mongoose = require('mongoose');
 const { updateLastUpdate } = require('./lastUpdateController');
-const { clearManufacturerCache } = require('../middleware/cacheHelper');
+const { parsePaginationQuery, paginateQuery } = require('../utils/pagination');
+const { formatLicensingAuthorityDoc } = require('../utils/formatLicensingAuthorityResponse');
 
 // @desc    Get all manufacturers
 // @route   GET /api/manufacturers
 // @access  Private/Admin
 exports.getManufacturers = async (req, res) => {
   try {
-    const manufacturers = await Manufacturer.find().sort({ name: 1 });
+    const pagination = parsePaginationQuery(req.query);
+    const { docs: manufacturers, total, pagination: paginationMeta } = await paginateQuery(
+      Manufacturer,
+      {},
+      { name: 1 },
+      pagination
+    );
 
     const formatted = manufacturers.map((m) => ({
       id: m._id.toString(),
@@ -39,11 +46,14 @@ exports.getManufacturers = async (req, res) => {
       updatedAt: m.updatedAt,
     }));
 
-    res.status(200).json({
+    const payload = {
       success: true,
-      count: formatted.length,
+      count: pagination.enabled ? total : formatted.length,
       manufacturers: formatted,
-    });
+    };
+    if (paginationMeta) payload.pagination = paginationMeta;
+
+    res.status(200).json(payload);
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -164,7 +174,6 @@ exports.createManufacturer = async (req, res) => {
     });
 
     await updateLastUpdate('Manufacturer');
-    clearManufacturerCache();
 
     res.status(201).json({
       success: true,
@@ -260,7 +269,6 @@ exports.updateManufacturer = async (req, res) => {
     });
 
     await updateLastUpdate('Manufacturer');
-    clearManufacturerCache();
 
     res.status(200).json({
       success: true,
@@ -325,7 +333,6 @@ exports.deleteManufacturer = async (req, res) => {
     await Manufacturer.findByIdAndDelete(req.params.id);
 
     await updateLastUpdate('Manufacturer');
-    clearManufacturerCache();
 
     res.status(200).json({
       success: true,
@@ -397,23 +404,15 @@ exports.getManufacturersPopulated = async (req, res) => {
         const vaccinesFormatted = await Promise.all(
           vaccines.map(async (v) => {
             // Find licensing dates for this vaccine
-            const licensingDates = await LicensingDate.find({
+            const licensingAuthorities = await LicensingAuthority.find({
               vaccineName: v.name,
             }).sort({ approvalDate: 1 });
 
             // Product profiles are not included - they should be fetched on demand via /api/product-profiles?vaccineName=...
 
-            const licensingDatesFormatted = licensingDates.map((ld) => ({
-              id: ld._id.toString(),
-              vaccineName: ld.vaccineName,
-              name: ld.name,
-              type: ld.type,
-              approvalDate: ld.approvalDate,
-              source: ld.source,
-              lastUpdateOnVaccine: ld.lastUpdateOnVaccine,
-              createdAt: ld.createdAt,
-              updatedAt: ld.updatedAt,
-            }));
+            const licensingAuthoritiesFormatted = licensingAuthorities.map((ld) =>
+              formatLicensingAuthorityDoc(ld)
+            );
 
             return {
               id: v._id.toString(),
@@ -421,7 +420,7 @@ exports.getManufacturersPopulated = async (req, res) => {
               vaccineType: v.vaccineType,
               pathogenNames: v.pathogenNames,
               manufacturerNames: v.manufacturerNames,
-              licensingDates: licensingDatesFormatted,
+              licensingAuthorities: licensingAuthoritiesFormatted,
               // productProfiles removed - fetch on demand via /api/product-profiles?vaccineName=...
               createdAt: v.createdAt,
               updatedAt: v.updatedAt,
@@ -553,23 +552,15 @@ exports.getManufacturerPopulated = async (req, res) => {
     const vaccinesFormatted = await Promise.all(
       vaccines.map(async (v) => {
         // Find licensing dates for this vaccine
-        const licensingDates = await LicensingDate.find({
+        const licensingAuthorities = await LicensingAuthority.find({
           vaccineName: v.name,
         }).sort({ approvalDate: 1 });
 
         // Product profiles are not included - they should be fetched on demand via /api/product-profiles?vaccineName=...
 
-        const licensingDatesFormatted = licensingDates.map((ld) => ({
-          id: ld._id.toString(),
-          vaccineName: ld.vaccineName,
-          name: ld.name,
-          type: ld.type,
-          approvalDate: ld.approvalDate,
-          source: ld.source,
-          lastUpdateOnVaccine: ld.lastUpdateOnVaccine,
-          createdAt: ld.createdAt,
-          updatedAt: ld.updatedAt,
-        }));
+        const licensingAuthoritiesFormatted = licensingAuthorities.map((ld) =>
+          formatLicensingAuthorityDoc(ld)
+        );
 
         return {
           id: v._id.toString(),
@@ -577,7 +568,7 @@ exports.getManufacturerPopulated = async (req, res) => {
           vaccineType: v.vaccineType,
           pathogenNames: v.pathogenNames,
           manufacturerNames: v.manufacturerNames,
-          licensingDates: licensingDatesFormatted,
+          licensingAuthorities: licensingAuthoritiesFormatted,
           // productProfiles removed - fetch on demand via /api/product-profiles?vaccineName=...
           createdAt: v.createdAt,
           updatedAt: v.updatedAt,

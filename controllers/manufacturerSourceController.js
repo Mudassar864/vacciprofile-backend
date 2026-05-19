@@ -1,7 +1,7 @@
 const ManufacturerSource = require('../models/ManufacturerSource');
 const mongoose = require('mongoose');
 const { updateLastUpdate } = require('./lastUpdateController');
-const { clearManufacturerCache } = require('../middleware/cacheHelper');
+const { parsePaginationQuery, paginateQuery } = require('../utils/pagination');
 
 // @desc    Get all manufacturer sources
 // @route   GET /api/manufacturer-sources
@@ -10,8 +10,13 @@ exports.getManufacturerSources = async (req, res) => {
   try {
     const { manufacturerName } = req.query;
     const query = manufacturerName ? { manufacturerName } : {};
-
-    const sources = await ManufacturerSource.find(query).sort({ manufacturerName: 1, title: 1 });
+    const pagination = parsePaginationQuery(req.query);
+    const { docs: sources, total, pagination: paginationMeta } = await paginateQuery(
+      ManufacturerSource,
+      query,
+      { manufacturerName: 1, title: 1 },
+      pagination
+    );
 
     const formatted = sources.map((item) => ({
       id: item._id.toString(),
@@ -23,11 +28,14 @@ exports.getManufacturerSources = async (req, res) => {
       updatedAt: item.updatedAt,
     }));
 
-    res.status(200).json({
+    const payload = {
       success: true,
-      count: formatted.length,
+      count: pagination.enabled ? total : formatted.length,
       sources: formatted,
-    });
+    };
+    if (paginationMeta) payload.pagination = paginationMeta;
+
+    res.status(200).json(payload);
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -94,7 +102,6 @@ exports.createManufacturerSource = async (req, res) => {
     });
 
     await updateLastUpdate('ManufacturerSource');
-    clearManufacturerCache();
 
     res.status(201).json({
       success: true,
@@ -153,7 +160,6 @@ exports.updateManufacturerSource = async (req, res) => {
     });
 
     await updateLastUpdate('ManufacturerSource');
-    clearManufacturerCache();
 
     res.status(200).json({
       success: true,
@@ -201,7 +207,6 @@ exports.deleteManufacturerSource = async (req, res) => {
     await ManufacturerSource.findByIdAndDelete(req.params.id);
 
     await updateLastUpdate('ManufacturerSource');
-    clearManufacturerCache();
 
     res.status(200).json({
       success: true,

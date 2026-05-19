@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const { validationResult } = require('express-validator');
 const mongoose = require('mongoose');
+const { parsePaginationQuery, buildPaginationMeta } = require('../utils/pagination');
 
 // @desc    Create new user
 // @route   POST /api/users
@@ -63,7 +64,23 @@ exports.createUser = async (req, res) => {
 // @access  Private/Admin
 exports.getUsers = async (req, res) => {
   try {
-    const users = await User.find().select('-password').sort({ createdAt: -1 });
+    const pagination = parsePaginationQuery(req.query);
+    const userQuery = User.find().select('-password').sort({ createdAt: -1 });
+
+    let users;
+    let total;
+    let paginationMeta = null;
+
+    if (pagination.enabled) {
+      [users, total] = await Promise.all([
+        userQuery.clone().skip(pagination.skip).limit(pagination.limit),
+        User.countDocuments(),
+      ]);
+      paginationMeta = buildPaginationMeta(total, pagination.page, pagination.limit);
+    } else {
+      users = await userQuery;
+      total = users.length;
+    }
 
     // Convert _id to id for frontend compatibility
     const formattedUsers = users.map(user => ({
@@ -75,11 +92,14 @@ exports.getUsers = async (req, res) => {
       createdAt: user.createdAt,
     }));
 
-    res.status(200).json({
+    const payload = {
       success: true,
-      count: formattedUsers.length,
+      count: pagination.enabled ? total : formattedUsers.length,
       users: formattedUsers,
-    });
+    };
+    if (paginationMeta) payload.pagination = paginationMeta;
+
+    res.status(200).json(payload);
   } catch (error) {
     res.status(500).json({
       success: false,

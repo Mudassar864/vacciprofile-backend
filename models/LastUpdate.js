@@ -10,7 +10,7 @@ const lastUpdateSchema = new mongoose.Schema(
         'Vaccine',
         'Pathogen',
         'Manufacturer',
-        'LicensingDate',
+        'LicensingAuthority',
         'ProductProfile',
         'ManufacturerProduct',
         'ManufacturerSource',

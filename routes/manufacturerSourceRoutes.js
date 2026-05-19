@@ -8,11 +8,10 @@ const {
   deleteManufacturerSource,
 } = require('../controllers/manufacturerSourceController');
 const { protect, authorize } = require('../middleware/auth');
-const { cacheMiddleware } = require('../middleware/cache');
 
-// GET routes - public access (no authentication) with caching
-router.route('/').get(cacheMiddleware(3600), getManufacturerSources);
-router.route('/:id').get(cacheMiddleware(3600), getManufacturerSource);
+// GET routes - public access (no authentication)
+router.route('/').get(getManufacturerSources);
+router.route('/:id').get(getManufacturerSource);
 
 // POST, PUT, DELETE routes - require authentication and admin role
 router.use(protect);

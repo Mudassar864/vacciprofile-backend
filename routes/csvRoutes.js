@@ -4,8 +4,8 @@ const multer = require('multer');
 const {
   importVaccines,
   exportVaccines,
-  importLicensingDates,
-  exportLicensingDates,
+  importLicensingAuthorities,
+  exportLicensingAuthorities,
   importProductProfiles,
   exportProductProfiles,
   importManufacturers,
@@ -34,7 +34,7 @@ router.use(authorize('admin'));
 
 // Import routes
 router.post('/import/vaccines', upload.single('file'), importVaccines);
-router.post('/import/licensing-dates', upload.single('file'), importLicensingDates);
+router.post('/import/licensing-authorities', upload.single('file'), importLicensingAuthorities);
 router.post('/import/product-profiles', upload.single('file'), importProductProfiles);
 router.post('/import/manufacturers', upload.single('file'), importManufacturers);
 router.post('/import/manufacturer-products', upload.single('file'), importManufacturerProducts);
@@ -46,7 +46,7 @@ router.post('/import/licensers', upload.single('file'), importLicensers);
 
 // Export routes
 router.get('/export/vaccines', exportVaccines);
-router.get('/export/licensing-dates', exportLicensingDates);
+router.get('/export/licensing-authorities', exportLicensingAuthorities);
 router.get('/export/product-profiles', exportProductProfiles);
 router.get('/export/manufacturers', exportManufacturers);
 router.get('/export/manufacturer-products', exportManufacturerProducts);

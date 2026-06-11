@@ -25,7 +25,8 @@ const allowedOrigins = [
   'http://localhost:3002',
   'https://vacciprofile.vercel.app',
   'https://www.vacciprofile.vercel.app',
-  'http://yewu.asia'
+  'http://yewu.asia',
+  "https://vacciprofile.com"
 ];
 
 app.use(cors({

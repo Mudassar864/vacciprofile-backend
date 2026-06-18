@@ -18,9 +18,19 @@ const { parsePaginationQuery, paginateQuery } = require('../utils/pagination');
 exports.getManufacturerCandidates = async (req, res) => {
   try {
     const { pathogenName, manufacturer } = req.query;
-    const query = {};
-    if (pathogenName) query.pathogenName = pathogenName;
-    if (manufacturer) query.manufacturer = manufacturer;
+    const queryParts = [];
+    if (pathogenName) {
+      queryParts.push(pathogenNameToCandidateQuery(pathogenName));
+    }
+    if (manufacturer) {
+      queryParts.push({ manufacturer });
+    }
+    const query =
+      queryParts.length === 0
+        ? {}
+        : queryParts.length === 1
+          ? queryParts[0]
+          : { $and: queryParts };
 
     const pagination = parsePaginationQuery(req.query);
     const { docs: candidates, total, pagination: paginationMeta } = await paginateQuery(

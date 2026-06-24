@@ -83,12 +83,11 @@ function renderTempFullTreeHtml(pathogens) {
               .map((v) => {
                 const authorityRows =
                   v.authority.length === 0
-                    ? '<tr><td colspan="6" class="muted">No licensing rows.</td></tr>'
+                    ? '<tr><td colspan="5" class="muted">No licensing rows.</td></tr>'
                     : v.authority
                         .map(
                           (a) => `<tr>
   <td>${escapeHtml(a.regulatory_authority_or_country || '—')}</td>
-  <td>${escapeHtml(a.type)}</td>
   <td>${escapeHtml(a.approvalDate)}</td>
   <td>${a.source && /^https?:\/\//i.test(a.source.trim()) ? `<a href="${escapeHtml(a.source.trim())}" target="_blank" rel="noopener">Source</a>` : escapeHtml(a.source || '—')}</td>
   <td class="muted small">${escapeHtml(a.approval_route || '—')}</td>
@@ -134,7 +133,7 @@ function renderTempFullTreeHtml(pathogens) {
   <h5 class="subsection-title">Licensing authority</h5>
   <div class="table-wrap">
     <table class="data-table">
-      <thead><tr><th>Authority / country</th><th>Type</th><th>Approval date</th><th>Source</th><th>Approval route</th><th>Market status</th></tr></thead>
+      <thead><tr><th>Authority / country</th><th>Approval date</th><th>Source</th><th>Approval route</th><th>Market status</th></tr></thead>
       <tbody>${authorityRows}</tbody>
     </table>
   </div>

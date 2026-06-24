@@ -7,14 +7,15 @@ const licensingAuthoritySchema = new mongoose.Schema(
       required: [true, 'Vaccine name is required'],
       trim: true,
     },
-    regulatory_authority_or_country: {
+    vaccine_regulatory_authority: {
       type: String,
-      required: [true, 'Regulatory authority or country is required'],
+      required: [true, 'vaccine_regulatory_authority is required'],
       default: 'N/A',
       trim: true,
     },
-    type: {
+    vaccine_country: {
       type: String,
+      required: [true, 'vaccine_country is required'],
       default: 'N/A',
       trim: true,
     },
@@ -43,11 +44,13 @@ const licensingAuthoritySchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    strict: false,
   }
 );
 
 licensingAuthoritySchema.index({ vaccineName: 1 });
-licensingAuthoritySchema.index({ regulatory_authority_or_country: 1 });
+licensingAuthoritySchema.index({ vaccine_regulatory_authority: 1 });
+licensingAuthoritySchema.index({ vaccine_country: 1 });
 
 module.exports = mongoose.model(
   'LicensingAuthority',

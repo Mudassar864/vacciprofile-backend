@@ -16,6 +16,11 @@ const {
   respondImport,
   respondImportError,
 } = require('../utils/csvImportStream');
+const {
+  parseLicensingAuthorityPayload,
+  toCsvRow,
+  CSV_COLUMNS,
+} = require('../utils/licensingAuthorityFields');
 
 function importProgressStats(results) {
   let imported = Array.isArray(results.success) ? results.success.length : 0;
@@ -396,44 +401,9 @@ exports.importLicensingAuthorities = async (req, res) => {
     for (let i = 0; i < records.length; i++) {
       const record = records[i];
       try {
-        const vaccineName =
-          record.vaccineName != null && String(record.vaccineName).trim() !== ''
-            ? String(record.vaccineName).trim()
-            : '';
-        const regulatory_authority_or_country =
-          record.regulatory_authority_or_country != null &&
-          String(record.regulatory_authority_or_country).trim() !== ''
-            ? String(record.regulatory_authority_or_country).trim()
-            : '';
+        const parsed = parseLicensingAuthorityPayload(record);
 
-        const type =
-          record.type != null && String(record.type).trim() !== ''
-            ? String(record.type).trim()
-            : 'N/A';
-
-        const approvalDate =
-          record.approvalDate != null &&
-          String(record.approvalDate).trim() !== '' &&
-          String(record.approvalDate).trim().toUpperCase() !== 'N/A'
-            ? String(record.approvalDate).trim()
-            : null;
-
-        const source =
-          record.source != null && String(record.source).trim() !== ''
-            ? String(record.source).trim()
-            : null;
-
-        const approval_route =
-          record.approval_route != null && String(record.approval_route).trim() !== ''
-            ? String(record.approval_route).trim()
-            : 'N/A';
-
-        const market_status =
-          record.market_status != null && String(record.market_status).trim() !== ''
-            ? String(record.market_status).trim()
-            : 'N/A';
-
-        if (!vaccineName) {
+        if (!parsed.vaccineName) {
           results.errors.push({
             vaccineName: 'Unknown',
             error: 'vaccineName is required',
@@ -441,41 +411,25 @@ exports.importLicensingAuthorities = async (req, res) => {
           continue;
         }
 
-        if (!regulatory_authority_or_country) {
+        if (!parsed.approvalDate) {
           results.errors.push({
-            vaccineName,
-            error: 'regulatory_authority_or_country is required',
-          });
-          continue;
-        }
-
-        if (!approvalDate) {
-          results.errors.push({
-            vaccineName,
+            vaccineName: parsed.vaccineName,
             error: 'Approval date is required and cannot be empty or N/A',
           });
           continue;
         }
 
-        if (!source) {
-          results.errors.push({
-            vaccineName,
-            error: 'Source is required and cannot be empty',
-          });
-          continue;
-        }
-
         const licensingAuthority = await LicensingAuthority.create({
-          vaccineName,
-          regulatory_authority_or_country,
-          type,
-          approvalDate,
-          source,
-          approval_route,
-          market_status,
+          vaccineName: parsed.vaccineName,
+          vaccine_regulatory_authority: parsed.vaccine_regulatory_authority,
+          vaccine_country: parsed.vaccine_country,
+          approvalDate: parsed.approvalDate,
+          source: parsed.source,
+          approval_route: parsed.approval_route,
+          market_status: parsed.market_status,
         });
         results.success.push(
-          `${licensingAuthority.vaccineName} - ${licensingAuthority.regulatory_authority_or_country}`
+          `${licensingAuthority.vaccineName} - ${licensingAuthority.vaccine_regulatory_authority} (${licensingAuthority.vaccine_country})`
         );
       } catch (error) {
         results.errors.push({
@@ -515,19 +469,12 @@ exports.importLicensingAuthorities = async (req, res) => {
 exports.exportLicensingAuthorities = async (req, res) => {
   try {
     const licensingAuthorities = await LicensingAuthority.find().sort({ vaccineName: 1 });
+    const rows = licensingAuthorities.map((doc) => toCsvRow(doc));
 
     const csvData = await new Promise((resolve, reject) => {
-      stringify(licensingAuthorities, {
+      stringify(rows, {
         header: true,
-        columns: [
-          'vaccineName',
-          'regulatory_authority_or_country',
-          'type',
-          'source',
-          'approvalDate',
-          'approval_route',
-          'market_status',
-        ],
+        columns: CSV_COLUMNS,
       }, (err, output) => {
         if (err) reject(err);
         else resolve(output);

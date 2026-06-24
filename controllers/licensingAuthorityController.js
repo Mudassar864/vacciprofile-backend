@@ -4,14 +4,22 @@ const mongoose = require('mongoose');
 const { updateLastUpdate } = require('./lastUpdateController');
 const { parsePaginationQuery, paginateQuery } = require('../utils/pagination');
 const { formatLicensingAuthorityDoc } = require('../utils/formatLicensingAuthorityResponse');
+const {
+  parseLicensingAuthorityPayload,
+  buildAuthorityMatchOrConditions,
+  resolveLicensingAuthorityFields,
+} = require('../utils/licensingAuthorityFields');
 
-// @desc    Distinct licensing authority names
+// @desc    Distinct regulatory authority names
 // @route   GET /api/licensing-authorities/stats/unique-licenser-names
 // @access  Public
 exports.getUniqueLicenserNames = async (req, res) => {
   try {
-    const names = await LicensingAuthority.distinct('regulatory_authority_or_country');
-    const trimmed = names
+    const [authorityNames, legacyNames] = await Promise.all([
+      LicensingAuthority.distinct('vaccine_regulatory_authority'),
+      LicensingAuthority.distinct('regulatory_authority_or_country'),
+    ]);
+    const trimmed = [...authorityNames, ...legacyNames]
       .filter((n) => typeof n === 'string' && n.trim())
       .map((n) => n.trim());
     const uniqueSorted = [...new Set(trimmed)].sort((a, b) => a.localeCompare(b));
@@ -82,13 +90,9 @@ exports.getVaccinesForAuthority = async (req, res) => {
       });
     }
 
-    const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const orConditions = keys.flatMap((k) => [
-      { regulatory_authority_or_country: { $regex: new RegExp(`^${escapeRegex(k)}$`, 'i') } },
-      { regulatory_authority_or_country: { $regex: new RegExp(escapeRegex(k), 'i') } },
-    ]);
-
-    const rows = await LicensingAuthority.find({ $or: orConditions }).sort({
+    const rows = await LicensingAuthority.find({
+      $or: buildAuthorityMatchOrConditions(keys),
+    }).sort({
       vaccineName: 1,
       approvalDate: 1,
     });
@@ -167,67 +171,35 @@ exports.getLicensingAuthority = async (req, res) => {
   }
 };
 
+function validateLicensingPayload(parsed) {
+  if (!parsed.vaccineName) {
+    return 'Vaccine name is required';
+  }
+  if (!parsed.approvalDate) {
+    return 'Approval date is required';
+  }
+  return null;
+}
+
 // @desc    Create licensing authority
 // @route   POST /api/licensing-authorities
 // @access  Private/Admin
 exports.createLicensingAuthority = async (req, res) => {
   try {
-    const {
-      vaccineName,
-      regulatory_authority_or_country,
-      type,
-      approvalDate,
-      source,
-      approval_route,
-      market_status,
-    } = req.body;
-
-    if (!vaccineName || typeof vaccineName !== 'string' || !vaccineName.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Vaccine name is required',
-      });
-    }
-
-    if (
-      !regulatory_authority_or_country ||
-      typeof regulatory_authority_or_country !== 'string' ||
-      !regulatory_authority_or_country.trim()
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: 'Regulatory authority or country is required',
-      });
-    }
-
-    if (!approvalDate || typeof approvalDate !== 'string' || !approvalDate.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Approval date is required',
-      });
-    }
-
-    if (!source || typeof source !== 'string' || !source.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Source URL is required',
-      });
+    const parsed = parseLicensingAuthorityPayload(req.body);
+    const validationError = validateLicensingPayload(parsed);
+    if (validationError) {
+      return res.status(400).json({ success: false, message: validationError });
     }
 
     const licensingAuthority = await LicensingAuthority.create({
-      vaccineName: vaccineName.trim(),
-      regulatory_authority_or_country: regulatory_authority_or_country.trim(),
-      type: type && typeof type === 'string' && type.trim() ? type.trim() : 'N/A',
-      approvalDate: approvalDate.trim(),
-      source: source.trim(),
-      approval_route:
-        approval_route && typeof approval_route === 'string' && approval_route.trim()
-          ? approval_route.trim()
-          : 'N/A',
-      market_status:
-        market_status && typeof market_status === 'string' && market_status.trim()
-          ? market_status.trim()
-          : 'N/A',
+      vaccineName: parsed.vaccineName,
+      vaccine_regulatory_authority: parsed.vaccine_regulatory_authority,
+      vaccine_country: parsed.vaccine_country,
+      approvalDate: parsed.approvalDate,
+      source: parsed.source,
+      approval_route: parsed.approval_route,
+      market_status: parsed.market_status,
     });
 
     await updateLastUpdate('LicensingAuthority');
@@ -258,78 +230,40 @@ exports.updateLicensingAuthority = async (req, res) => {
       });
     }
 
-    const {
-      vaccineName,
-      regulatory_authority_or_country,
-      type,
-      approvalDate,
-      source,
-      approval_route,
-      market_status,
-    } = req.body;
-
-    let licensingAuthority = await LicensingAuthority.findById(req.params.id);
-
-    if (!licensingAuthority) {
+    const existing = await LicensingAuthority.findById(req.params.id);
+    if (!existing) {
       return res.status(404).json({
         success: false,
         message: 'Licensing authority not found',
       });
     }
 
-    const updateData = {};
-    if (vaccineName !== undefined && vaccineName !== null) {
-      if (typeof vaccineName !== 'string' || !vaccineName.trim()) {
-        return res.status(400).json({
-          success: false,
-          message: 'Vaccine name cannot be empty',
-        });
-      }
-      updateData.vaccineName = vaccineName.trim();
-    }
-    if (regulatory_authority_or_country !== undefined && regulatory_authority_or_country !== null) {
-      if (typeof regulatory_authority_or_country !== 'string' || !regulatory_authority_or_country.trim()) {
-        return res.status(400).json({
-          success: false,
-          message: 'Regulatory authority or country cannot be empty',
-        });
-      }
-      updateData.regulatory_authority_or_country = regulatory_authority_or_country.trim();
-    }
-    if (type !== undefined && type !== null) {
-      updateData.type = typeof type === 'string' && type.trim() ? type.trim() : 'N/A';
-    }
-    if (approvalDate !== undefined && approvalDate !== null) {
-      if (typeof approvalDate !== 'string' || !approvalDate.trim()) {
-        return res.status(400).json({
-          success: false,
-          message: 'Approval date cannot be empty',
-        });
-      }
-      updateData.approvalDate = approvalDate.trim();
-    }
-    if (source !== undefined && source !== null) {
-      if (typeof source !== 'string' || !source.trim()) {
-        return res.status(400).json({
-          success: false,
-          message: 'Source URL cannot be empty',
-        });
-      }
-      updateData.source = source.trim();
-    }
-    if (approval_route !== undefined && approval_route !== null) {
-      updateData.approval_route =
-        typeof approval_route === 'string' && approval_route.trim() ? approval_route.trim() : 'N/A';
-    }
-    if (market_status !== undefined && market_status !== null) {
-      updateData.market_status =
-        typeof market_status === 'string' && market_status.trim() ? market_status.trim() : 'N/A';
+    const merged = {
+      ...existing.toObject(),
+      ...req.body,
+    };
+    const parsed = parseLicensingAuthorityPayload(merged);
+    const validationError = validateLicensingPayload(parsed);
+    if (validationError) {
+      return res.status(400).json({ success: false, message: validationError });
     }
 
-    licensingAuthority = await LicensingAuthority.findByIdAndUpdate(req.params.id, updateData, {
-      new: true,
-      runValidators: true,
-    });
+    const licensingAuthority = await LicensingAuthority.findByIdAndUpdate(
+      req.params.id,
+      {
+        $set: {
+          vaccineName: parsed.vaccineName,
+          vaccine_regulatory_authority: parsed.vaccine_regulatory_authority,
+          vaccine_country: parsed.vaccine_country,
+          approvalDate: parsed.approvalDate,
+          source: parsed.source,
+          approval_route: parsed.approval_route,
+          market_status: parsed.market_status,
+        },
+        $unset: { regulatory_authority_or_country: '', type: '' },
+      },
+      { new: true, runValidators: true }
+    );
 
     await updateLastUpdate('LicensingAuthority');
 
@@ -375,6 +309,49 @@ exports.deleteLicensingAuthority = async (req, res) => {
     res.status(200).json({
       success: true,
       message: 'Licensing authority deleted successfully',
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Backfill vaccine_regulatory_authority + vaccine_country from legacy field
+// @route   POST /api/licensing-authorities/migrate-split-fields
+// @access  Admin
+exports.migrateSplitFields = async (req, res) => {
+  try {
+    const docs = await LicensingAuthority.find({
+      $or: [
+        { vaccine_regulatory_authority: { $exists: false } },
+        { vaccine_country: { $exists: false } },
+        { vaccine_regulatory_authority: '' },
+        { vaccine_country: '' },
+      ],
+    });
+
+    let updated = 0;
+    for (const doc of docs) {
+      const { vaccine_regulatory_authority, vaccine_country } = resolveLicensingAuthorityFields(
+        doc.toObject()
+      );
+      await LicensingAuthority.updateOne(
+        { _id: doc._id },
+        {
+          $set: { vaccine_regulatory_authority, vaccine_country },
+          $unset: { regulatory_authority_or_country: '' },
+        }
+      );
+      updated += 1;
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Migrated ${updated} licensing authority records`,
+      updated,
     });
   } catch (error) {
     res.status(500).json({

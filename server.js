@@ -46,7 +46,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -73,6 +73,7 @@ app.use('/api/manufacturer-candidates', require('./routes/manufacturerCandidateR
 app.use('/api/nitags', require('./routes/nitagRoutes'));
 app.use('/api/licensers', require('./routes/licenserRoutes'));
 app.use('/api/csv', require('./routes/csvRoutes'));
+app.use('/api/chat', require('./routes/chatRoutes'));
 app.use('/api/last-update', require('./routes/lastUpdateRoutes'));
 
 // Health check route

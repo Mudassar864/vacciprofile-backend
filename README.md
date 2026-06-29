@@ -17,11 +17,14 @@ Express.js backend API for vaccine profile management system with MongoDB.
    npm install
    ```
 
-2. Create a `.env` file:
+2. Create a `.env` file (see `.env.example` for all options):
    ```env
    MONGODB_URI=mongodb://localhost:27017/vacciprofile
    JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
    ```
+
+   For **AI chat (Bedrock RAG)**, also set AWS credentials and knowledge base ID.  
+   See [docs/BEDROCK_IAM_SETUP.md](./docs/BEDROCK_IAM_SETUP.md).
 
 3. Start MongoDB (if running locally)
 

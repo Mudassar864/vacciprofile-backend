@@ -10,6 +10,41 @@ const {
   resolveLicensingAuthorityFields,
 } = require('../utils/licensingAuthorityFields');
 
+function buildLicensingAuthoritySearchQuery(search) {
+  const term = typeof search === 'string' ? search.trim() : '';
+  if (!term) return {};
+
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = { $regex: escaped, $options: 'i' };
+
+  return {
+    $or: [
+      { vaccineName: regex },
+      { vaccine_regulatory_authority: regex },
+      { regulatory_authority_or_country: regex },
+      { vaccine_country: regex },
+      { approvalDate: regex },
+      { source: regex },
+      { approval_route: regex },
+      { market_status: regex },
+    ],
+  };
+}
+
+function buildLicensingAuthorityListQuery({ vaccineName, search } = {}) {
+  const parts = [];
+  if (vaccineName) {
+    parts.push({ vaccineName });
+  }
+  const searchQuery = buildLicensingAuthoritySearchQuery(search);
+  if (Object.keys(searchQuery).length > 0) {
+    parts.push(searchQuery);
+  }
+  if (parts.length === 0) return {};
+  if (parts.length === 1) return parts[0];
+  return { $and: parts };
+}
+
 // @desc    Distinct regulatory authority names
 // @route   GET /api/licensing-authorities/stats/unique-licenser-names
 // @access  Public
@@ -43,8 +78,8 @@ exports.getUniqueLicenserNames = async (req, res) => {
 // @access  Private/Admin
 exports.getLicensingAuthorities = async (req, res) => {
   try {
-    const { vaccineName } = req.query;
-    const query = vaccineName ? { vaccineName } : {};
+    const { vaccineName, search } = req.query;
+    const query = buildLicensingAuthorityListQuery({ vaccineName, search });
     const pagination = parsePaginationQuery(req.query);
     const { docs: licensingAuthorities, total, pagination: paginationMeta } = await paginateQuery(
       LicensingAuthority,

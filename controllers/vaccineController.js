@@ -6,15 +6,33 @@ const { updateLastUpdate } = require('./lastUpdateController');
 const { parsePaginationQuery, paginateQuery } = require('../utils/pagination');
 const { formatLicensingAuthorityDoc } = require('../utils/formatLicensingAuthorityResponse');
 
+function buildVaccineSearchQuery(search) {
+  const term = typeof search === 'string' ? search.trim() : '';
+  if (!term) return {};
+
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = { $regex: escaped, $options: 'i' };
+
+  return {
+    $or: [
+      { name: regex },
+      { pathogenNames: regex },
+      { manufacturerNames: regex },
+      { vaccineType: regex },
+    ],
+  };
+}
+
 // @desc    Get all vaccines
 // @route   GET /api/vaccines
 // @access  Private/Admin
 exports.getVaccines = async (req, res) => {
   try {
+    const query = buildVaccineSearchQuery(req.query.search);
     const pagination = parsePaginationQuery(req.query);
     const { docs: vaccines, total, pagination: paginationMeta } = await paginateQuery(
       Vaccine,
-      {},
+      query,
       { name: 1 },
       pagination
     );

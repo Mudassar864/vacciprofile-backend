@@ -1,0 +1,34 @@
+name: Deploy Backend to EC2
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Deploy to EC2
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USER }}
+        key: ${{ secrets.EC2_KEY }}
+        port: 22
+        script: |
+          cd /var/www/vacciprofile/backend
+          
+          # Pull latest changes
+          git pull origin main
+          
+          # Install dependencies
+          npm install
+          
+          # Restart PM2
+          pm2 restart vacciprofile-backend
+          
+          # Check status
+          pm2 status vacciprofile-backend

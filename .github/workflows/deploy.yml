@@ -21,7 +21,7 @@ jobs:
         script: |
           cd /var/www/vacciprofile/backend
           
-          # Pull latest changes
+          # Pull latest changes.
           git pull origin main
           
           # Install dependencies

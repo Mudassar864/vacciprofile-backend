@@ -16,6 +16,13 @@ exports.getChatConfig = async (req, res) => {
     process.env.AWS_ACCESS_KEY_ID?.trim() && process.env.AWS_SECRET_ACCESS_KEY?.trim()
   );
 
+  const missing = [];
+  if (!config.knowledgeBaseId) missing.push('BEDROCK_KNOWLEDGE_BASE_ID');
+  if (!hasCredentials) missing.push('AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY');
+  if (config.modelArn && !config.modelArn.startsWith('arn:aws:bedrock:')) {
+    missing.push('BEDROCK_MODEL_ARN (must be a full Bedrock model ARN)');
+  }
+
   res.status(200).json({
     success: true,
     data: {
@@ -24,7 +31,8 @@ exports.getChatConfig = async (req, res) => {
       modelArn: config.modelArn,
       kbType: config.kbType,
       useManagedKb: config.useManagedKb,
-      configured: Boolean(config.knowledgeBaseId && hasCredentials),
+      configured: missing.length === 0,
+      missing,
     },
   });
 };

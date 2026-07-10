@@ -4,12 +4,23 @@ const {
   RetrieveAndGenerateCommand,
 } = require('@aws-sdk/client-bedrock-agent-runtime');
 
+function normalizeModelArn(value) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('arn:')) return trimmed;
+  if (trimmed.includes('::foundation-model/')) {
+    return `arn:aws:bedrock:${trimmed}`;
+  }
+  return trimmed;
+}
+
 function getBedrockConfig() {
   const region = process.env.AWS_REGION || 'us-west-2';
   const knowledgeBaseId = process.env.BEDROCK_KNOWLEDGE_BASE_ID || 'FG7MYPLH6Q';
-  const modelArn =
+  const modelArn = normalizeModelArn(
     process.env.BEDROCK_MODEL_ARN ||
-    'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-sonnet-4-6';
+      'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-sonnet-4-6'
+  );
   const maxAgentIteration = Number(process.env.BEDROCK_AGENTIC_MAX_ITERATIONS || 5);
   const kbType = (process.env.KB_TYPE || 'managed').trim().toLowerCase();
   const useManagedKb = kbType !== 'self-managed';

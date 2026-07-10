@@ -27,8 +27,10 @@ jobs:
           # Install dependencies
           npm install
           
-          # Restart PM2
-          pm2 restart vacciprofile-backend
+          # Recreate PM2 process
+          pm2 delete vacciprofile-backend
+          pm2 start server.js --name vacciprofile-backend
+          pm2 save
           
           # Check status
           pm2 status vacciprofile-backend

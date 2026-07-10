@@ -1,8 +1,8 @@
 node_modules/
-.env
 .DS_Store
 *.log
 .vscode/
 .idea/
 
 frontend/
+.env.example

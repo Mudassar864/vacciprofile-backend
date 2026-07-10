@@ -14,26 +14,23 @@ connectDB();
 const app = express();
 
 // Middleware
-// CORS configuration - allow multiple origins
-// Vaccines, candidates, manufacturers, nitags, compare are fetched SERVER-SIDE (page.tsx)
-// so no CORS. Product profiles & licensing authorities are fetched CLIENT-SIDE (on click) so CORS applies.
-const allowedOrigins = [
-  process.env.FRONTEND_URL || 'http://localhost:3001',
-  process.env.PORTAL_URL || 'http://localhost:3001',
-  'http://localhost:3000',
-  'http://localhost:3001',
-  'http://localhost:3002',
-  'https://vacciprofile.vercel.app',
-  'https://www.vacciprofile.vercel.app',
-  "https://vacciprofile.com"
-];
+// CORS configuration - comma-separated origins in CORS_ORIGINS
+const DEFAULT_CORS_ORIGINS =
+  'http://localhost:3000,http://localhost:3001,http://localhost:3002,https://vacciprofile.vercel.app,https://www.vacciprofile.vercel.app,https://vacciprofile.com';
+
+const allowedOrigins = [...new Set(
+  (process.env.CORS_ORIGINS || DEFAULT_CORS_ORIGINS)
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+)];
 
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
-    if (allowedOrigins.indexOf(origin) !== -1) {
+    if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       // In development, allow any localhost origin

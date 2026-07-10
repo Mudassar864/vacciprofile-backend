@@ -2,33 +2,47 @@ name: Deploy Backend to EC2
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Deploy to EC2
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ${{ secrets.EC2_USER }}
-        key: ${{ secrets.EC2_KEY }}
-        port: 22
-        script: |
-          cd /var/www/vacciprofile/backend
-          
-          # Pull latest changes.
-          git pull origin main
-          
-          # Install dependencies
-          npm install
-          
-          # Restart PM2
-          pm2 restart vacciprofile-backend
-          
-          # Check status
-          pm2 status vacciprofile-backend
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          port: 22
+          script: |
+            set -e
+
+            echo "===== Moving to project directory ====="
+            cd /var/www/vacciprofile/backend
+
+            echo "===== Current Node Version ====="
+            node -v
+            npm -v
+
+            echo "===== Cleaning Git Repository ====="
+            git merge --abort || true
+            git fetch origin
+            git reset --hard origin/main
+            git clean -fd
+
+            echo "===== Installing Dependencies ====="
+            npm ci
+
+            echo "===== Restarting PM2 ====="
+            pm2 restart vacciprofile-backend --update-env
+
+            echo "===== PM2 Status ====="
+            pm2 status
+
+            echo "===== Deployment Completed Successfully ====="

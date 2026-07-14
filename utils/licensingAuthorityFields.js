@@ -96,6 +96,37 @@ function parseLicensingAuthorityPayload(body = {}) {
   };
 }
 
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Match existing row by vaccine + regulatory authority + country (case-insensitive). */
+function buildNaturalKeyQuery(parsed) {
+  const vaccineName = (parsed.vaccineName || '').trim();
+  const vaccine_regulatory_authority = (parsed.vaccine_regulatory_authority || 'N/A').trim();
+  const vaccine_country = (parsed.vaccine_country || 'N/A').trim();
+
+  return {
+    vaccineName: { $regex: new RegExp(`^${escapeRegex(vaccineName)}$`, 'i') },
+    vaccine_regulatory_authority: {
+      $regex: new RegExp(`^${escapeRegex(vaccine_regulatory_authority)}$`, 'i'),
+    },
+    vaccine_country: { $regex: new RegExp(`^${escapeRegex(vaccine_country)}$`, 'i') },
+  };
+}
+
+function licensingAuthorityDocumentFromParsed(parsed) {
+  return {
+    vaccineName: parsed.vaccineName,
+    vaccine_regulatory_authority: parsed.vaccine_regulatory_authority,
+    vaccine_country: parsed.vaccine_country,
+    approvalDate: parsed.approvalDate,
+    source: parsed.source,
+    approval_route: parsed.approval_route,
+    market_status: parsed.market_status,
+  };
+}
+
 function buildAuthorityMatchOrConditions(keys) {
   const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return keys.flatMap((k) => {
@@ -141,6 +172,8 @@ module.exports = {
   deriveCountryFromAuthority,
   resolveLicensingAuthorityFields,
   parseLicensingAuthorityPayload,
+  buildNaturalKeyQuery,
+  licensingAuthorityDocumentFromParsed,
   buildAuthorityMatchOrConditions,
   toCsvRow,
   CSV_COLUMNS,

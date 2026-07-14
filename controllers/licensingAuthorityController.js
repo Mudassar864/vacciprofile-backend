@@ -7,6 +7,8 @@ const { formatLicensingAuthorityDoc } = require('../utils/formatLicensingAuthori
 const {
   parseLicensingAuthorityPayload,
   buildAuthorityMatchOrConditions,
+  buildNaturalKeyQuery,
+  licensingAuthorityDocumentFromParsed,
   resolveLicensingAuthorityFields,
 } = require('../utils/licensingAuthorityFields');
 
@@ -216,6 +218,26 @@ function validateLicensingPayload(parsed) {
   return null;
 }
 
+async function upsertLicensingAuthority(parsed) {
+  const existing = await LicensingAuthority.findOne(buildNaturalKeyQuery(parsed));
+  const document = licensingAuthorityDocumentFromParsed(parsed);
+
+  if (existing) {
+    const licensingAuthority = await LicensingAuthority.findByIdAndUpdate(
+      existing._id,
+      {
+        $set: document,
+        $unset: { regulatory_authority_or_country: '', type: '' },
+      },
+      { new: true, runValidators: true }
+    );
+    return { licensingAuthority, created: false };
+  }
+
+  const licensingAuthority = await LicensingAuthority.create(document);
+  return { licensingAuthority, created: true };
+}
+
 // @desc    Create licensing authority
 // @route   POST /api/licensing-authorities
 // @access  Private/Admin
@@ -227,21 +249,17 @@ exports.createLicensingAuthority = async (req, res) => {
       return res.status(400).json({ success: false, message: validationError });
     }
 
-    const licensingAuthority = await LicensingAuthority.create({
-      vaccineName: parsed.vaccineName,
-      vaccine_regulatory_authority: parsed.vaccine_regulatory_authority,
-      vaccine_country: parsed.vaccine_country,
-      approvalDate: parsed.approvalDate,
-      source: parsed.source,
-      approval_route: parsed.approval_route,
-      market_status: parsed.market_status,
-    });
+    const { licensingAuthority, created } = await upsertLicensingAuthority(parsed);
 
     await updateLastUpdate('LicensingAuthority');
 
-    res.status(201).json({
+    res.status(created ? 201 : 200).json({
       success: true,
-      message: 'Licensing authority created successfully',
+      message: created
+        ? 'Licensing authority created successfully'
+        : 'Licensing authority updated successfully',
+      created,
+      updated: !created,
       licensingAuthority: formatLicensingAuthorityDoc(licensingAuthority),
     });
   } catch (error) {
@@ -283,18 +301,22 @@ exports.updateLicensingAuthority = async (req, res) => {
       return res.status(400).json({ success: false, message: validationError });
     }
 
+    const duplicate = await LicensingAuthority.findOne({
+      ...buildNaturalKeyQuery(parsed),
+      _id: { $ne: existing._id },
+    });
+    if (duplicate) {
+      return res.status(409).json({
+        success: false,
+        message:
+          'Another record already exists with this vaccine name, regulatory authority, and country.',
+      });
+    }
+
     const licensingAuthority = await LicensingAuthority.findByIdAndUpdate(
       req.params.id,
       {
-        $set: {
-          vaccineName: parsed.vaccineName,
-          vaccine_regulatory_authority: parsed.vaccine_regulatory_authority,
-          vaccine_country: parsed.vaccine_country,
-          approvalDate: parsed.approvalDate,
-          source: parsed.source,
-          approval_route: parsed.approval_route,
-          market_status: parsed.market_status,
-        },
+        $set: licensingAuthorityDocumentFromParsed(parsed),
         $unset: { regulatory_authority_or_country: '', type: '' },
       },
       { new: true, runValidators: true }

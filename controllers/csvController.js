@@ -18,6 +18,8 @@ const {
 } = require('../utils/csvImportStream');
 const {
   parseLicensingAuthorityPayload,
+  buildNaturalKeyQuery,
+  licensingAuthorityDocumentFromParsed,
   toCsvRow,
   CSV_COLUMNS,
 } = require('../utils/licensingAuthorityFields');
@@ -419,15 +421,25 @@ exports.importLicensingAuthorities = async (req, res) => {
           continue;
         }
 
-        const licensingAuthority = await LicensingAuthority.create({
-          vaccineName: parsed.vaccineName,
-          vaccine_regulatory_authority: parsed.vaccine_regulatory_authority,
-          vaccine_country: parsed.vaccine_country,
-          approvalDate: parsed.approvalDate,
-          source: parsed.source,
-          approval_route: parsed.approval_route,
-          market_status: parsed.market_status,
-        });
+        const document = licensingAuthorityDocumentFromParsed(parsed);
+        const existing = await LicensingAuthority.findOne(buildNaturalKeyQuery(parsed));
+        let licensingAuthority;
+
+        if (existing) {
+          licensingAuthority = await LicensingAuthority.findByIdAndUpdate(
+            existing._id,
+            {
+              $set: document,
+              $unset: { regulatory_authority_or_country: '', type: '' },
+            },
+            { new: true, runValidators: true }
+          );
+          results.updated += 1;
+        } else {
+          licensingAuthority = await LicensingAuthority.create(document);
+          results.created += 1;
+        }
+
         results.success.push(
           `${licensingAuthority.vaccineName} - ${licensingAuthority.vaccine_regulatory_authority} (${licensingAuthority.vaccine_country})`
         );

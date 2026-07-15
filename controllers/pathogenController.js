@@ -14,6 +14,13 @@ const {
 const { replyTempFullTree, wantsJson } = require('../utils/tempFullTreeReply');
 const { parsePaginationQuery, paginateQuery } = require('../utils/pagination');
 const { formatLicensingAuthorityDoc } = require('../utils/formatLicensingAuthorityResponse');
+const {
+  PATHOGEN_DB_FIELDS,
+  parsePathogenPayload,
+  pathogenDocumentFromParsed,
+  formatPathogenDoc,
+} = require('../utils/formatPathogenResponse');
+const { upsertPathogenByName } = require('../utils/pathogenUpsert');
 
 function formatAuthorityRow(ld) {
   return formatLicensingAuthorityDoc(ld);
@@ -149,16 +156,16 @@ function renderTempFullTreeHtml(pathogens) {
     <p class="id-line muted">ID: ${escapeHtml(p.id)}</p>
   </header>
   ${
-    p.description
-      ? `<section class="block"><h3>Description</h3><div class="multiline body-text">${escapeHtml(
-          p.description
+    p.definition
+      ? `<section class="block"><h3>Definition</h3><div class="multiline body-text">${escapeHtml(
+          p.definition
         )}</div></section>`
       : ''
   }
   ${
-    p.bulletpoints
-      ? `<section class="block"><h3>Bullet points</h3><div class="multiline body-text">${escapeHtml(
-          p.bulletpoints
+    p.key_facts
+      ? `<section class="block"><h3>Key facts</h3><div class="multiline body-text">${escapeHtml(
+          p.key_facts
         )}</div></section>`
       : ''
   }
@@ -173,10 +180,10 @@ function renderTempFullTreeHtml(pathogens) {
     <h3>Reference lists on pathogen</h3>
     <dl class="field-list">
       <div class="dl-row"><dt>Vaccine names</dt><dd class="multiline">${escapeHtml(
-        p.vaccineNames || '—'
+        p.vaccine_names || '—'
       )}</dd></div>
       <div class="dl-row"><dt>Candidate vaccine names</dt><dd class="multiline">${escapeHtml(
-        p.candidateVaccineNames || '—'
+        p.candidate_vaccine_names || '—'
       )}</dd></div>
     </dl>
   </section>
@@ -355,18 +362,7 @@ exports.getPathogens = async (req, res) => {
       pagination
     );
 
-    const formatted = pathogens.map((p) => ({
-      id: p._id.toString(),
-      name: p.name,
-      description: p.description,
-      image: p.image,
-      bulletpoints: p.bulletpoints,
-      link: p.link,
-      vaccineNames: p.vaccineNames,
-      candidateVaccineNames: p.candidateVaccineNames,
-      createdAt: p.createdAt,
-      updatedAt: p.updatedAt,
-    }));
+    const formatted = pathogens.map((p) => formatPathogenDoc(p));
 
     const payload = {
       success: true,
@@ -408,18 +404,7 @@ exports.getPathogen = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      pathogen: {
-        id: pathogen._id.toString(),
-        name: pathogen.name,
-        description: pathogen.description,
-        image: pathogen.image,
-        bulletpoints: pathogen.bulletpoints,
-        link: pathogen.link,
-        vaccineNames: pathogen.vaccineNames,
-        candidateVaccineNames: pathogen.candidateVaccineNames,
-        createdAt: pathogen.createdAt,
-        updatedAt: pathogen.updatedAt,
-      },
+      pathogen: formatPathogenDoc(pathogen),
     });
   } catch (error) {
     res.status(500).json({
@@ -435,53 +420,29 @@ exports.getPathogen = async (req, res) => {
 // @access  Private/Admin
 exports.createPathogen = async (req, res) => {
   try {
-    const {
-      name,
-      description,
-      image,
-      bulletpoints,
-      link,
-      vaccineNames,
-      candidateVaccineNames,
-    } = req.body;
+    const parsed = parsePathogenPayload(req.body);
+    const name = parsed.name;
 
-    // Check if pathogen already exists
-    const pathogenExists = await Pathogen.findOne({ name: name.trim() });
-
-    if (pathogenExists) {
+    if (!name) {
       return res.status(400).json({
         success: false,
-        message: 'Pathogen with this name already exists',
+        message: 'Pathogen name is required',
       });
     }
 
-    const pathogen = await Pathogen.create({
-      name: name.trim(),
-      description: description ? description.trim() : '',
-      image: image ? image.trim() : '',
-      bulletpoints: bulletpoints ? bulletpoints.trim() : '',
-      link: link ? link.trim() : '',
-      vaccineNames: vaccineNames ? vaccineNames.trim() : '',
-      candidateVaccineNames: candidateVaccineNames ? candidateVaccineNames.trim() : '',
-    });
+    // Upsert by name: update if exists, otherwise create
+    const { pathogen, created } = await upsertPathogenByName(parsed);
 
     await updateLastUpdate('Pathogen');
 
-    res.status(201).json({
+    res.status(created ? 201 : 200).json({
       success: true,
-      message: 'Pathogen created successfully',
-      pathogen: {
-        id: pathogen._id.toString(),
-        name: pathogen.name,
-        description: pathogen.description,
-        image: pathogen.image,
-        bulletpoints: pathogen.bulletpoints,
-        link: pathogen.link,
-        vaccineNames: pathogen.vaccineNames,
-        candidateVaccineNames: pathogen.candidateVaccineNames,
-        createdAt: pathogen.createdAt,
-        updatedAt: pathogen.updatedAt,
-      },
+      message: created
+        ? 'Pathogen created successfully'
+        : 'Pathogen updated successfully',
+      created,
+      updated: !created,
+      pathogen: formatPathogenDoc(pathogen),
     });
   } catch (error) {
     res.status(500).json({
@@ -527,20 +488,18 @@ exports.updatePathogen = async (req, res) => {
       }
     }
 
-    // Prepare update object - only include fields that are provided
-    const updateData = {};
-    const fields = [
-      'name', 'description', 'image', 'bulletpoints', 'link',
-      'vaccineNames', 'candidateVaccineNames'
-    ];
+    const parsed = parsePathogenPayload(req.body);
+    const updateData = pathogenDocumentFromParsed(parsed, { partial: true });
+    const hasUpdates = PATHOGEN_DB_FIELDS.some((field) =>
+      Object.prototype.hasOwnProperty.call(parsed, field)
+    );
 
-    fields.forEach(field => {
-      if (req.body[field] !== undefined) {
-        updateData[field] = typeof req.body[field] === 'string' 
-          ? req.body[field].trim() 
-          : String(req.body[field]).trim();
-      }
-    });
+    if (!hasUpdates && !parsed.name) {
+      return res.status(400).json({
+        success: false,
+        message: 'No valid fields provided for update',
+      });
+    }
 
     pathogen = await Pathogen.findByIdAndUpdate(req.params.id, updateData, {
       new: true,
@@ -552,18 +511,7 @@ exports.updatePathogen = async (req, res) => {
     res.status(200).json({
       success: true,
       message: 'Pathogen updated successfully',
-      pathogen: {
-        id: pathogen._id.toString(),
-        name: pathogen.name,
-        description: pathogen.description,
-        image: pathogen.image,
-        bulletpoints: pathogen.bulletpoints,
-        link: pathogen.link,
-        vaccineNames: pathogen.vaccineNames,
-        candidateVaccineNames: pathogen.candidateVaccineNames,
-        createdAt: pathogen.createdAt,
-        updatedAt: pathogen.updatedAt,
-      },
+      pathogen: formatPathogenDoc(pathogen),
     });
   } catch (error) {
     res.status(500).json({
@@ -655,17 +603,8 @@ exports.getPathogensPopulated = async (req, res) => {
         );
 
         return {
-          id: p._id.toString(),
-          name: p.name,
-          description: p.description,
-          image: p.image,
-          bulletpoints: p.bulletpoints,
-          link: p.link,
-          vaccineNames: p.vaccineNames,
-          candidateVaccineNames: p.candidateVaccineNames,
+          ...formatPathogenDoc(p),
           vaccines: vaccinesFormatted,
-          createdAt: p.createdAt,
-          updatedAt: p.updatedAt,
         };
       })
     );
@@ -741,17 +680,8 @@ exports.getPathogenPopulated = async (req, res) => {
     res.status(200).json({
       success: true,
       pathogen: {
-        id: pathogen._id.toString(),
-        name: pathogen.name,
-        description: pathogen.description,
-        image: pathogen.image,
-        bulletpoints: pathogen.bulletpoints,
-        link: pathogen.link,
-        vaccineNames: pathogen.vaccineNames,
-        candidateVaccineNames: pathogen.candidateVaccineNames,
+        ...formatPathogenDoc(pathogen),
         vaccines: vaccinesFormatted,
-        createdAt: pathogen.createdAt,
-        updatedAt: pathogen.updatedAt,
       },
     });
   } catch (error) {
@@ -800,16 +730,7 @@ exports.getPathogensTempFullTree = async (req, res) => {
         );
 
         return {
-          id: p._id.toString(),
-          name: p.name,
-          description: p.description,
-          image: p.image,
-          bulletpoints: p.bulletpoints,
-          link: p.link,
-          vaccineNames: p.vaccineNames,
-          candidateVaccineNames: p.candidateVaccineNames,
-          createdAt: p.createdAt,
-          updatedAt: p.updatedAt,
+          ...formatPathogenDoc(p),
           vaccines: vaccinesFormatted,
         };
       })

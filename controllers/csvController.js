@@ -23,6 +23,13 @@ const {
   toCsvRow,
   CSV_COLUMNS,
 } = require('../utils/licensingAuthorityFields');
+const {
+  PATHOGEN_CSV_COLUMNS,
+  fromPathogenCsvRow,
+  pathogenDocumentFromParsed,
+  toPathogenCsvRow,
+} = require('../utils/formatPathogenResponse');
+const { upsertPathogenByName } = require('../utils/pathogenUpsert');
 
 function importProgressStats(results) {
   let imported = Array.isArray(results.success) ? results.success.length : 0;
@@ -1011,22 +1018,28 @@ exports.importPathogens = async (req, res) => {
 
     const results = {
       success: [],
+      updated: [],
       errors: [],
     };
 
     for (let i = 0; i < records.length; i++) {
       const record = records[i];
       try {
-        const pathogen = await Pathogen.create({
-          name: record.name.trim(),
-          description: record.description ? record.description.trim() : '',
-          image: record.image ? record.image.trim() : '',
-          bulletpoints: record.bulletpoints ? record.bulletpoints.trim() : '',
-          link: record.link ? record.link.trim() : '',
-          vaccineNames: record.vaccineNames ? record.vaccineNames.trim() : '',
-          candidateVaccineNames: record.candidateVaccineNames ? record.candidateVaccineNames.trim() : '',
-        });
-        results.success.push(pathogen.name);
+        const parsed = fromPathogenCsvRow(record);
+        if (!parsed.name) {
+          results.errors.push({
+            name: record.name || 'Unknown',
+            error: 'Pathogen name is required',
+          });
+          continue;
+        }
+
+        const { pathogen, created } = await upsertPathogenByName(parsed);
+        if (created) {
+          results.success.push(pathogen.name);
+        } else {
+          results.updated.push(pathogen.name);
+        }
       } catch (error) {
         results.errors.push({
           name: record.name || 'Unknown',
@@ -1037,14 +1050,17 @@ exports.importPathogens = async (req, res) => {
     }
 
     // Update last update time if any pathogens were imported
-    if (results.success.length > 0) {
+    if (results.success.length > 0 || results.updated.length > 0) {
       await updateLastUpdate('Pathogen');
     }
 
+    const totalProcessed = results.success.length + results.updated.length;
     respondImport(res, progress, {
       success: true,
-      message: `Imported ${results.success.length} pathogens successfully`,
-      imported: results.success.length,
+      message: `Processed ${totalProcessed} pathogens successfully (${results.success.length} created, ${results.updated.length} updated)`,
+      imported: totalProcessed,
+      created: results.success.length,
+      updated: results.updated.length,
       errors: results.errors.length,
       details: results,
     });
@@ -1066,19 +1082,12 @@ exports.importPathogens = async (req, res) => {
 exports.exportPathogens = async (req, res) => {
   try {
     const pathogens = await Pathogen.find().sort({ name: 1 });
+    const rows = pathogens.map((pathogen) => toPathogenCsvRow(pathogen));
 
     const csvData = await new Promise((resolve, reject) => {
-      stringify(pathogens, {
+      stringify(rows, {
         header: true,
-        columns: [
-          'name',
-          'description',
-          'image',
-          'bulletpoints',
-          'link',
-          'vaccineNames',
-          'candidateVaccineNames',
-        ],
+        columns: PATHOGEN_CSV_COLUMNS,
       }, (err, output) => {
         if (err) reject(err);
         else resolve(output);

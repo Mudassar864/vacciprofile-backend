@@ -30,6 +30,7 @@ const {
   toPathogenCsvRow,
 } = require('../utils/formatPathogenResponse');
 const { upsertPathogenByName } = require('../utils/pathogenUpsert');
+const { parseDelimitedList } = require('../utils/parseDelimitedList');
 
 function importProgressStats(results) {
   let imported = Array.isArray(results.success) ? results.success.length : 0;
@@ -94,10 +95,10 @@ exports.importVaccines = async (req, res) => {
     const mergeStringArrays = (existingStr, newStr) => {
       if (!existingStr || !existingStr.trim()) return newStr.trim();
       if (!newStr || !newStr.trim()) return existingStr.trim();
-      
-      const existing = existingStr.split(',').map(s => s.trim()).filter(Boolean);
-      const newItems = newStr.split(',').map(s => s.trim()).filter(Boolean);
-      
+
+      const existing = parseDelimitedList(existingStr);
+      const newItems = parseDelimitedList(newStr);
+
       const merged = [...new Set([...existing, ...newItems])];
       return merged.join(', ');
     };
@@ -154,8 +155,10 @@ exports.importVaccines = async (req, res) => {
           const recordManufacturerNames = record.manufacturerNames ? String(record.manufacturerNames).trim() : '';
 
           if (recordManufacturerNames) {
-            const existingManufacturers = (vaccineExists.manufacturerNames || '').split(',').map(s => s.trim().toLowerCase());
-            const newManufacturers = recordManufacturerNames.split(',').map(s => s.trim()).filter(Boolean);
+            const existingManufacturers = parseDelimitedList(vaccineExists.manufacturerNames).map((s) =>
+              s.toLowerCase()
+            );
+            const newManufacturers = parseDelimitedList(recordManufacturerNames);
             
             // Check if any new manufacturer doesn't exist
             const hasNewManufacturer = newManufacturers.some(m => 
@@ -172,8 +175,10 @@ exports.importVaccines = async (req, res) => {
           const recordPathogenNames = record.pathogenNames ? String(record.pathogenNames).trim() : '';
 
           if (recordPathogenNames) {
-            const existingPathogens = (vaccineExists.pathogenNames || '').split(',').map(s => s.trim().toLowerCase());
-            const newPathogens = recordPathogenNames.split(',').map(s => s.trim()).filter(Boolean);
+            const existingPathogens = parseDelimitedList(vaccineExists.pathogenNames).map((s) =>
+              s.toLowerCase()
+            );
+            const newPathogens = parseDelimitedList(recordPathogenNames);
             
             // Check if any new pathogen doesn't exist
             const hasNewPathogen = newPathogens.some(p => 

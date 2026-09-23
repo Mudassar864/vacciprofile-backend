@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const {
   getPathogens,
+  getPathogensIndex,
   getPathogen,
   createPathogen,
   updatePathogen,
@@ -14,6 +15,7 @@ const { protect, authorize } = require('../middleware/auth');
 
 // GET routes - public access (no authentication)
 router.route('/populated').get(getPathogensPopulated);
+router.route('/index').get(getPathogensIndex);
 // TEMPORARY — remove when done: full nested pathogens → vaccines → labels + authority
 router.route('/temp-full-tree').get(getPathogensTempFullTree);
 router.route('/:id/populated').get(getPathogenPopulated);

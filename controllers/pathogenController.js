@@ -349,6 +349,56 @@ function renderTempFullTreeHtml(pathogens) {
 </html>`;
 }
 
+// @desc    Pathogen names for browse sidebars
+// @route   GET /api/pathogens/index
+// @access  Public
+exports.getPathogensIndex = async (req, res) => {
+  try {
+    const pathogens = await Pathogen.find().select('name').sort({ name: 1 }).lean();
+    const formatted = pathogens
+      .filter((p) => p.name)
+      .map((p) => ({
+        id: p._id.toString(),
+        name: p.name,
+      }));
+
+    res.status(200).json({
+      success: true,
+      count: formatted.length,
+      pathogens: formatted,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message,
+    });
+  }
+};
+
+async function vaccinesWithLicenses(vaccines) {
+  const names = vaccines.map((v) => v.name).filter(Boolean);
+  const licensingAuthorities = names.length
+    ? await LicensingAuthority.find({ vaccineName: { $in: names } }).sort({ approvalDate: 1 })
+    : [];
+
+  const byVaccineName = new Map();
+  for (const row of licensingAuthorities) {
+    if (!byVaccineName.has(row.vaccineName)) byVaccineName.set(row.vaccineName, []);
+    byVaccineName.get(row.vaccineName).push(formatLicensingAuthorityDoc(row));
+  }
+
+  return vaccines.map((v) => ({
+    id: v._id.toString(),
+    name: v.name,
+    vaccineType: v.vaccineType,
+    pathogenNames: v.pathogenNames,
+    manufacturerNames: v.manufacturerNames,
+    licensingAuthorities: byVaccineName.get(v.name) || [],
+    updatedAt: v.updatedAt,
+  }));
+}
+
 // @desc    Get all pathogens
 // @route   GET /api/pathogens
 // @access  Private/Admin
@@ -644,38 +694,10 @@ exports.getPathogenPopulated = async (req, res) => {
       });
     }
 
-    const vaccineQuery = pathogenNameToVaccineQuery(pathogen.name);
-
-    // Find vaccines where any of the pathogen name patterns appear in pathogenNames
-    const vaccines = await Vaccine.find(vaccineQuery).sort({ name: 1 });
-
-    // For each vaccine, get licensing dates (product profiles fetched on demand)
-    const vaccinesFormatted = await Promise.all(
-      vaccines.map(async (v) => {
-        // Find licensing dates for this vaccine
-        const licensingAuthorities = await LicensingAuthority.find({
-          vaccineName: v.name,
-        }).sort({ approvalDate: 1 });
-
-        // Product profiles are not included - they should be fetched on demand via /api/product-profiles?vaccineName=...
-
-        const licensingAuthoritiesFormatted = licensingAuthorities.map((ld) =>
-          formatLicensingAuthorityDoc(ld)
-        );
-
-        return {
-          id: v._id.toString(),
-          name: v.name,
-          vaccineType: v.vaccineType,
-          pathogenNames: v.pathogenNames,
-          manufacturerNames: v.manufacturerNames,
-          licensingAuthorities: licensingAuthoritiesFormatted,
-          // productProfiles removed - fetch on demand via /api/product-profiles?vaccineName=...
-          createdAt: v.createdAt,
-          updatedAt: v.updatedAt,
-        };
-      })
-    );
+    const vaccines = await Vaccine.find(pathogenNameToVaccineQuery(pathogen.name))
+      .select('name vaccineType pathogenNames manufacturerNames updatedAt')
+      .sort({ name: 1 });
+    const vaccinesFormatted = await vaccinesWithLicenses(vaccines);
 
     res.status(200).json({
       success: true,

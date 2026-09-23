@@ -31,6 +31,7 @@ const {
 } = require('../utils/formatPathogenResponse');
 const { upsertPathogenByName } = require('../utils/pathogenUpsert');
 const { parseDelimitedList } = require('../utils/parseDelimitedList');
+const { normalizeVaccineType } = require('../utils/normalizeVaccineType');
 
 function importProgressStats(results) {
   let imported = Array.isArray(results.success) ? results.success.length : 0;
@@ -144,7 +145,7 @@ exports.importVaccines = async (req, res) => {
           let wasUpdated = false;
 
           // Use exact column names from CSV
-          const recordVaccineType = record.vaccineType ? String(record.vaccineType).trim().toLowerCase() : null;
+          const recordVaccineType = record.vaccineType ? normalizeVaccineType(record.vaccineType) : null;
           
           if (recordVaccineType && ['single', 'combination'].includes(recordVaccineType) && recordVaccineType !== vaccineExists.vaccineType) {
             updatedVaccineType = recordVaccineType;
@@ -224,7 +225,7 @@ exports.importVaccines = async (req, res) => {
           if (!manufacturerNames) manufacturerNames = record.ManufacturerNames || record.manufacturer || record.Manufacturer || record['Manufacturer Names'] || '';
           
           // Convert to string and trim
-          vaccineType = String(vaccineType || 'single').trim().toLowerCase();
+          vaccineType = normalizeVaccineType(vaccineType || 'single');
           pathogenNames = String(pathogenNames || '').trim();
           manufacturerNames = String(manufacturerNames || '').trim();
           

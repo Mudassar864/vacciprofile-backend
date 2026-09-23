@@ -5,6 +5,7 @@ const {
   getLicensingAuthority,
   getUniqueLicenserNames,
   getVaccinesForAuthority,
+  getCountryCounts,
   createLicensingAuthority,
   updateLicensingAuthority,
   deleteLicensingAuthority,
@@ -15,6 +16,7 @@ const { protect, authorize } = require('../middleware/auth');
 router.route('/').get(getLicensingAuthorities);
 router.route('/stats/unique-licenser-names').get(getUniqueLicenserNames);
 router.route('/vaccines-for-authority').get(getVaccinesForAuthority);
+router.route('/country-counts').get(getCountryCounts);
 router.route('/:id').get(getLicensingAuthority);
 
 router.post('/migrate-split-fields', protect, authorize('admin'), migrateSplitFields);

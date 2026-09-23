@@ -6,6 +6,7 @@ const { updateLastUpdate } = require('./lastUpdateController');
 const { parsePaginationQuery, paginateQuery } = require('../utils/pagination');
 const { formatLicensingAuthorityDoc } = require('../utils/formatLicensingAuthorityResponse');
 const { parseDelimitedList } = require('../utils/parseDelimitedList');
+const { normalizeVaccineType } = require('../utils/normalizeVaccineType');
 
 function buildVaccineSearchQuery(search) {
   const term = typeof search === 'string' ? search.trim() : '';
@@ -137,9 +138,12 @@ exports.createVaccine = async (req, res) => {
       let wasUpdated = false;
 
       // Check and update vaccineType if provided and different
-      if (vaccineType && vaccineType.trim() && vaccineType.trim() !== vaccineExists.vaccineType) {
-        updatedVaccineType = vaccineType.trim();
-        wasUpdated = true;
+      if (vaccineType && String(vaccineType).trim()) {
+        const normalizedType = normalizeVaccineType(vaccineType);
+        if (normalizedType && normalizedType !== vaccineExists.vaccineType) {
+          updatedVaccineType = normalizedType;
+          wasUpdated = true;
+        }
       }
 
       if (manufacturerNames && manufacturerNames.trim()) {
@@ -206,7 +210,7 @@ exports.createVaccine = async (req, res) => {
     // Vaccine doesn't exist - create new one
     const vaccine = await Vaccine.create({
       name: name.trim(),
-      vaccineType,
+      vaccineType: normalizeVaccineType(vaccineType),
       pathogenNames: pathogenNames.trim(),
       manufacturerNames: manufacturerNames.trim(),
     });
@@ -274,7 +278,7 @@ exports.updateVaccine = async (req, res) => {
 
     const updateData = {};
     if (name !== undefined) updateData.name = name.trim();
-    if (vaccineType !== undefined) updateData.vaccineType = vaccineType;
+    if (vaccineType !== undefined) updateData.vaccineType = normalizeVaccineType(vaccineType);
     if (pathogenNames !== undefined) updateData.pathogenNames = pathogenNames.trim();
     if (manufacturerNames !== undefined) updateData.manufacturerNames = manufacturerNames.trim();
 

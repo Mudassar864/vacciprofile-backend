@@ -1,5 +1,7 @@
 const LicensingAuthority = require('../models/LicensingAuthority');
 const Vaccine = require('../models/Vaccine');
+const Licenser = require('../models/Licenser');
+const { computeCountryCounts } = require('../utils/authorityCountryCounts');
 const mongoose = require('mongoose');
 const { updateLastUpdate } = require('./lastUpdateController');
 const { parsePaginationQuery, paginateQuery } = require('../utils/pagination');
@@ -112,6 +114,33 @@ exports.getLicensingAuthorities = async (req, res) => {
 // @desc    Vaccines licensed by authority name(s) — for authorities browse page
 // @route   GET /api/licensing-authorities/vaccines-for-authority
 // @access  Public
+// @desc    Country sidebar counts without sending license rows
+// @route   GET /api/licensing-authorities/country-counts
+// @access  Public
+exports.getCountryCounts = async (req, res) => {
+  try {
+    const [licensers, licensingDocs] = await Promise.all([
+      Licenser.find().select('acronym fullName country').lean(),
+      LicensingAuthority.find()
+        .select(
+          'vaccineName vaccine_country vaccine_regulatory_authority regulatory_authority_or_country approvalDate approval_route market_status source'
+        )
+        .lean(),
+    ]);
+
+    res.status(200).json({
+      success: true,
+      counts: computeCountryCounts(licensers, licensingDocs),
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message,
+    });
+  }
+};
+
 exports.getVaccinesForAuthority = async (req, res) => {
   try {
     const rawKeys = req.query.keys || req.query.key || '';

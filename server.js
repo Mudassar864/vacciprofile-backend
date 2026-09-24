@@ -34,7 +34,19 @@ function parseCorsOrigins(raw) {
   )];
 }
 
-const allowedOrigins = parseCorsOrigins(process.env.CORS_ORIGINS);
+const DEFAULT_CORS_ORIGINS = [
+  'https://vacciprofile.vercel.app',
+  'https://www.vacciprofile.vercel.app',
+  'https://vacciprofile.com',
+  'https://www.vacciprofile.com',
+  'https://vacciprofile-portal.vercel.app',
+  'http://localhost:3000',
+  'http://localhost:3001',
+];
+
+const allowedOrigins = parseCorsOrigins(
+  [DEFAULT_CORS_ORIGINS.join(','), process.env.CORS_ORIGINS].filter(Boolean).join(',')
+);
 
 if (!allowedOrigins.length) {
   console.warn('⚠️  CORS_ORIGINS is empty — browser clients will be blocked until it is set in .env');

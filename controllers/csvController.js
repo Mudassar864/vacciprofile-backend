@@ -1,0 +1,1389 @@
+const Vaccine = require('../models/Vaccine');
+const LicensingAuthority = require('../models/LicensingAuthority');
+const ProductProfile = require('../models/ProductProfile');
+const Manufacturer = require('../models/Manufacturer');
+const ManufacturerProduct = require('../models/ManufacturerProduct');
+const ManufacturerSource = require('../models/ManufacturerSource');
+const Pathogen = require('../models/Pathogen');
+const ManufacturerCandidate = require('../models/ManufacturerCandidate');
+const NITAG = require('../models/NITAG');
+const Licenser = require('../models/Licenser');
+const { parse } = require('csv-parse');
+const { stringify } = require('csv-stringify');
+const { updateLastUpdate } = require('./lastUpdateController');
+const {
+  createImportProgress,
+  respondImport,
+  respondImportError,
+} = require('../utils/csvImportStream');
+const {
+  parseLicensingAuthorityPayload,
+  buildNaturalKeyQuery,
+  licensingAuthorityDocumentFromParsed,
+  toCsvRow,
+  CSV_COLUMNS,
+} = require('../utils/licensingAuthorityFields');
+const {
+  PATHOGEN_CSV_COLUMNS,
+  fromPathogenCsvRow,
+  pathogenDocumentFromParsed,
+  toPathogenCsvRow,
+} = require('../utils/formatPathogenResponse');
+const { upsertPathogenByName } = require('../utils/pathogenUpsert');
+const { parseDelimitedList } = require('../utils/parseDelimitedList');
+const { normalizeVaccineType } = require('../utils/normalizeVaccineType');
+const { handleError } = require('../utils/httpErrors');
+
+/**
+ * Re-importing the same CSV used to create duplicate rows (or fail on unique names).
+ * Match on the record's natural key and update in place instead.
+ */
+async function upsertImported(Model, keyFields, doc) {
+  const key = {};
+  for (const field of keyFields) key[field] = doc[field] ?? '';
+  return Model.findOneAndUpdate(key, { $set: doc }, {
+    upsert: true,
+    new: true,
+    runValidators: true,
+    setDefaultsOnInsert: true,
+  });
+}
+
+function importProgressStats(results) {
+  let imported = Array.isArray(results.success) ? results.success.length : 0;
+  if (Array.isArray(results.updated)) {
+    imported += results.updated.length;
+  }
+  return {
+    imported,
+    errors: Array.isArray(results.errors) ? results.errors.length : 0,
+  };
+}
+
+// Helper function to parse CSV with proper UTF-8 encoding handling
+const parseCSV = async (buffer) => {
+  // Handle UTF-8 encoding properly, including BOM (Byte Order Mark)
+  let csvData = buffer.toString('utf-8');
+  
+  // Remove UTF-8 BOM if present (common in Excel exports)
+  if (csvData.charCodeAt(0) === 0xFEFF) {
+    csvData = csvData.slice(1);
+  }
+  
+  // Normalize Unicode characters (handles special characters like ® properly)
+  csvData = csvData.normalize('NFC');
+  
+  return new Promise((resolve, reject) => {
+    parse(csvData, {
+      columns: true,
+      skip_empty_lines: true,
+      trim: true,
+      bom: true, // Handle BOM automatically
+      relax_quotes: true, // Handle quotes more flexibly
+      escape: '"', // Proper escape character
+      relax_column_count: true, // Handle inconsistent column counts
+    }, (err, output) => {
+      if (err) reject(err);
+      else resolve(output);
+    });
+  });
+};
+
+// @desc    Import vaccines from CSV
+// @route   POST /api/csv/import/vaccines
+// @access  Private/Admin
+exports.importVaccines = async (req, res) => {
+  let progress;
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'CSV file is required',
+      });
+    }
+
+    const records = await parseCSV(req.file.buffer);
+    progress = createImportProgress(req, res, {
+      total: records.length,
+      fileSize: req.file.size,
+    });
+
+    // Helper function to merge comma-separated strings without duplicates
+    const mergeStringArrays = (existingStr, newStr) => {
+      if (!existingStr || !existingStr.trim()) return newStr.trim();
+      if (!newStr || !newStr.trim()) return existingStr.trim();
+
+      const existing = parseDelimitedList(existingStr);
+      const newItems = parseDelimitedList(newStr);
+
+      const merged = [...new Set([...existing, ...newItems])];
+      return merged.join(', ');
+    };
+
+    const results = {
+      success: [],
+      errors: [],
+      updated: [],
+    };
+
+    // Log available column names from first record for debugging
+    if (records.length > 0) {
+      console.log('Total records to process:', records.length);
+      console.log('CSV columns:', Object.keys(records[0]));
+      console.log('First record sample:', JSON.stringify(records[0], null, 2));
+    }
+
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
+      try {
+        // Use exact column name from CSV (should be 'name' based on your CSV)
+        // Normalize Unicode to ensure special characters like ® are handled correctly
+        const vaccineName = record.name ? String(record.name).trim().normalize('NFC') : '';
+        
+        if (!vaccineName) {
+          results.errors.push({
+            name: 'Unknown',
+            error: 'Vaccine name is required. Columns found: ' + Object.keys(record).join(', '),
+          });
+          continue;
+        }
+
+        // Check if vaccine already exists
+        const vaccineExists = await Vaccine.findOne({ name: vaccineName });
+
+        console.log(`Processing ${vaccineName}: exists=${!!vaccineExists}, pathogenNames="${record.pathogenNames}", manufacturerNames="${record.manufacturerNames}"`);
+
+        if (vaccineExists) {
+          // Vaccine exists - merge manufacturerNames, pathogenNames, and update vaccineType if they don't match
+          let updatedManufacturerNames = vaccineExists.manufacturerNames;
+          let updatedPathogenNames = vaccineExists.pathogenNames;
+          let updatedVaccineType = vaccineExists.vaccineType;
+          let wasUpdated = false;
+
+          // Use exact column names from CSV
+          const recordVaccineType = record.vaccineType ? normalizeVaccineType(record.vaccineType) : null;
+          
+          if (recordVaccineType && ['single', 'combination'].includes(recordVaccineType) && recordVaccineType !== vaccineExists.vaccineType) {
+            updatedVaccineType = recordVaccineType;
+            wasUpdated = true;
+          }
+
+          // Use exact column names from CSV for manufacturerNames
+          const recordManufacturerNames = record.manufacturerNames ? String(record.manufacturerNames).trim() : '';
+
+          if (recordManufacturerNames) {
+            const existingManufacturers = parseDelimitedList(vaccineExists.manufacturerNames).map((s) =>
+              s.toLowerCase()
+            );
+            const newManufacturers = parseDelimitedList(recordManufacturerNames);
+            
+            // Check if any new manufacturer doesn't exist
+            const hasNewManufacturer = newManufacturers.some(m => 
+              !existingManufacturers.includes(m.trim().toLowerCase())
+            );
+
+            if (hasNewManufacturer) {
+              updatedManufacturerNames = mergeStringArrays(vaccineExists.manufacturerNames, recordManufacturerNames);
+              wasUpdated = true;
+            }
+          }
+
+          // Use exact column names from CSV for pathogenNames
+          const recordPathogenNames = record.pathogenNames ? String(record.pathogenNames).trim() : '';
+
+          if (recordPathogenNames) {
+            const existingPathogens = parseDelimitedList(vaccineExists.pathogenNames).map((s) =>
+              s.toLowerCase()
+            );
+            const newPathogens = parseDelimitedList(recordPathogenNames);
+            
+            // Check if any new pathogen doesn't exist
+            const hasNewPathogen = newPathogens.some(p => 
+              !existingPathogens.includes(p.trim().toLowerCase())
+            );
+
+            if (hasNewPathogen) {
+              updatedPathogenNames = mergeStringArrays(vaccineExists.pathogenNames, recordPathogenNames);
+              wasUpdated = true;
+            }
+          }
+
+          // Update vaccine if there were changes
+          if (wasUpdated) {
+            try {
+              vaccineExists.manufacturerNames = updatedManufacturerNames;
+              vaccineExists.pathogenNames = updatedPathogenNames;
+              vaccineExists.vaccineType = updatedVaccineType;
+              await vaccineExists.save();
+              results.updated.push(`${vaccineName} (updated)`);
+              console.log(`Updated ${vaccineName} successfully`);
+            } catch (saveError) {
+              console.error(`Error saving ${vaccineName}:`, saveError);
+              results.errors.push({
+                name: vaccineName,
+                error: `Failed to update: ${saveError.message}`,
+              });
+            }
+          } else {
+            results.success.push(`${vaccineName} (already exists)`);
+            console.log(`${vaccineName} already exists with matching data`);
+          }
+        } else {
+          // Vaccine doesn't exist - create new one
+          // Try multiple column name variations - use exact column names from CSV first
+          let vaccineType = record.vaccineType;
+          let pathogenNames = record.pathogenNames;
+          let manufacturerNames = record.manufacturerNames;
+          
+          // Fallback to other variations if needed
+          if (!vaccineType) vaccineType = record.VaccineType || record.type || record.Type || 'single';
+          if (!pathogenNames) pathogenNames = record.PathogenNames || record.pathogen || record.Pathogen || record['Pathogen Names'] || '';
+          if (!manufacturerNames) manufacturerNames = record.ManufacturerNames || record.manufacturer || record.Manufacturer || record['Manufacturer Names'] || '';
+          
+          // Convert to string and trim
+          vaccineType = normalizeVaccineType(vaccineType || 'single');
+          pathogenNames = String(pathogenNames || '').trim();
+          manufacturerNames = String(manufacturerNames || '').trim();
+          
+          // Check if required fields are present
+          if (!pathogenNames) {
+            results.errors.push({
+              name: vaccineName,
+              error: `Pathogen names are required. Value received: "${record.pathogenNames}". Available columns: ${Object.keys(record).join(', ')}`,
+            });
+            continue;
+          }
+          
+          if (!manufacturerNames) {
+            results.errors.push({
+              name: vaccineName,
+              error: `Manufacturer names are required. Value received: "${record.manufacturerNames}". Available columns: ${Object.keys(record).join(', ')}`,
+            });
+            continue;
+          }
+          
+          // Validate vaccineType enum
+          if (!['single', 'combination'].includes(vaccineType)) {
+            results.errors.push({
+              name: vaccineName,
+              error: `Invalid vaccineType: "${vaccineType}". Must be 'single' or 'combination'`,
+            });
+            continue;
+          }
+          
+          try {
+            console.log(`Creating new vaccine ${vaccineName} with:`, { vaccineType, pathogenNames, manufacturerNames });
+            const vaccine = await Vaccine.create({
+              name: vaccineName,
+              vaccineType,
+              pathogenNames,
+              manufacturerNames,
+            });
+            results.success.push(vaccine.name);
+            console.log(`Successfully created ${vaccineName}`);
+          } catch (createError) {
+            // Catch any create errors and provide detailed message
+            let createErrorMessage = createError.message;
+            if (createError.name === 'ValidationError') {
+              const validationErrors = Object.values(createError.errors).map(err => err.message).join(', ');
+              createErrorMessage = `Validation error: ${validationErrors}`;
+            }
+            if (createError.code === 11000) {
+              createErrorMessage = `Duplicate vaccine name: ${vaccineName}`;
+            }
+            console.error(`Error creating ${vaccineName}:`, createError);
+            results.errors.push({
+              name: vaccineName,
+              error: createErrorMessage,
+            });
+          }
+        }
+      } catch (error) {
+        let errorMessage = error.message;
+        const errorName = record.name || record.vaccineName || 'Unknown';
+        
+        // Handle Mongoose validation errors
+        if (error.name === 'ValidationError') {
+          const validationErrors = Object.values(error.errors).map(err => err.message).join(', ');
+          errorMessage = `Validation error: ${validationErrors}`;
+        }
+        
+        // Handle duplicate key error
+        if (error.code === 11000) {
+          errorMessage = `Duplicate vaccine name: ${errorName}`;
+        }
+        
+        // Log the full error for debugging
+        try {
+          console.error(`Error processing vaccine ${errorName}:`, {
+            error: error.message,
+            errorName: error.name,
+            errorCode: error.code,
+            record: record ? Object.keys(record).join(', ') : 'No record',
+          });
+        } catch (logError) {
+          console.error(`Error logging failed: ${logError.message}`);
+        }
+        
+        results.errors.push({
+          name: errorName,
+          error: errorMessage,
+        });
+      }
+      progress.tick(i, importProgressStats(results));
+    }
+
+    const totalProcessed = results.success.length + results.updated.length;
+    try {
+      console.log('Import results summary:', {
+        totalProcessed,
+        success: results.success.length,
+        updated: results.updated.length,
+        errors: results.errors.length,
+        firstFewErrors: results.errors.slice(0, 5).map(e => ({ name: e.name, error: e.error })),
+      });
+    } catch (logError) {
+      console.error('Error logging summary:', logError.message);
+    }
+    
+    // Update last update time if any vaccines were processed
+    if (totalProcessed > 0) {
+      await updateLastUpdate('Vaccine');
+    }
+
+    respondImport(res, progress, {
+      success: true,
+      message: `Processed ${totalProcessed} vaccines successfully (${results.success.length} created/new, ${results.updated.length} updated)`,
+      imported: results.success.length,
+      updated: results.updated.length,
+      errors: results.errors.length,
+      details: results,
+    });
+  } catch (error) {
+    console.error('Server error in importVaccines:', error);
+    if (typeof progress !== 'undefined' && progress.fail(error.message)) {
+      return;
+    }
+    handleError(res, error);
+  }
+};
+
+// @desc    Export vaccines to CSV
+// @route   GET /api/csv/export/vaccines
+// @access  Private/Admin
+exports.exportVaccines = async (req, res) => {
+  try {
+    const vaccines = await Vaccine.find().sort({ name: 1 });
+
+    const csvData = await new Promise((resolve, reject) => {
+      stringify(vaccines, {
+        header: true,
+        columns: ['name', 'vaccineType', 'pathogenNames', 'manufacturerNames'],
+      }, (err, output) => {
+        if (err) reject(err);
+        else resolve(output);
+      });
+    });
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=vaccines.csv');
+    // Send with UTF-8 BOM to ensure Excel and other tools recognize UTF-8 encoding
+    res.send('\ufeff' + csvData);
+  } catch (error) {
+    handleError(res, error);
+  }
+};
+
+// @desc    Import licensing authorities from CSV
+// @route   POST /api/csv/import/licensing-authorities
+// @access  Private/Admin
+exports.importLicensingAuthorities = async (req, res) => {
+  let progress;
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'CSV file is required',
+      });
+    }
+
+    const records = await parseCSV(req.file.buffer);
+    progress = createImportProgress(req, res, {
+      total: records.length,
+      fileSize: req.file.size,
+    });
+
+    const results = {
+      success: [],
+      errors: [],
+      created: 0,
+      updated: 0,
+    };
+
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
+      try {
+        const parsed = parseLicensingAuthorityPayload(record);
+
+        if (!parsed.vaccineName) {
+          results.errors.push({
+            vaccineName: 'Unknown',
+            error: 'vaccineName is required',
+          });
+          continue;
+        }
+
+        if (!parsed.approvalDate) {
+          results.errors.push({
+            vaccineName: parsed.vaccineName,
+            error: 'Approval date is required and cannot be empty or N/A',
+          });
+          continue;
+        }
+
+        const document = licensingAuthorityDocumentFromParsed(parsed);
+        const existing = await LicensingAuthority.findOne(buildNaturalKeyQuery(parsed));
+        let licensingAuthority;
+
+        if (existing) {
+          licensingAuthority = await LicensingAuthority.findByIdAndUpdate(
+            existing._id,
+            {
+              $set: document,
+              $unset: { regulatory_authority_or_country: '', type: '' },
+            },
+            { new: true, runValidators: true }
+          );
+          results.updated += 1;
+        } else {
+          licensingAuthority = await LicensingAuthority.create(document);
+          results.created += 1;
+        }
+
+        results.success.push(
+          `${licensingAuthority.vaccineName} - ${licensingAuthority.vaccine_regulatory_authority} (${licensingAuthority.vaccine_country})`
+        );
+      } catch (error) {
+        results.errors.push({
+          vaccineName: record.vaccineName || 'Unknown',
+          error: error.message,
+        });
+      }
+      progress.tick(i, importProgressStats(results));
+    }
+
+    if (results.success.length > 0) {
+      await updateLastUpdate('LicensingAuthority');
+    }
+
+    respondImport(res, progress, {
+      success: true,
+      message: `Imported ${results.success.length} licensing authorities successfully`,
+      imported: results.success.length,
+      errors: results.errors.length,
+      details: results,
+    });
+  } catch (error) {
+    if (progress && progress.fail(error.message)) {
+      return;
+    }
+    handleError(res, error);
+  }
+};
+
+// @desc    Export licensing authorities to CSV
+// @route   GET /api/csv/export/licensing-authorities
+// @access  Private/Admin
+exports.exportLicensingAuthorities = async (req, res) => {
+  try {
+    const licensingAuthorities = await LicensingAuthority.find().sort({ vaccineName: 1 });
+    const rows = licensingAuthorities.map((doc) => toCsvRow(doc));
+
+    const csvData = await new Promise((resolve, reject) => {
+      stringify(rows, {
+        header: true,
+        columns: CSV_COLUMNS,
+      }, (err, output) => {
+        if (err) reject(err);
+        else resolve(output);
+      });
+    });
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=licensing-authorities.csv');
+    // Send with UTF-8 BOM to ensure Excel and other tools recognize UTF-8 encoding
+    res.send('\ufeff' + csvData);
+  } catch (error) {
+    handleError(res, error);
+  }
+};
+
+// @desc    Import product profiles from CSV
+// @route   POST /api/csv/import/product-profiles
+// @access  Private/Admin
+exports.importProductProfiles = async (req, res) => {
+  let progress;
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'CSV file is required',
+      });
+    }
+
+    const records = await parseCSV(req.file.buffer);
+    progress = createImportProgress(req, res, {
+      total: records.length,
+      fileSize: req.file.size,
+    });
+
+    const results = {
+      success: [],
+      errors: [],
+    };
+
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
+      try {
+        // Helper function to handle default values - only use default if field is truly empty
+        const getValue = (value, defaultValue) => {
+          return (value !== undefined && value !== null && String(value).trim() !== '')
+            ? String(value).trim()
+            : defaultValue;
+        };
+
+        const vaccineNameTrim =
+          record.vaccineName !== undefined && record.vaccineName !== null
+            ? String(record.vaccineName).trim()
+            : '';
+        const typeTrim =
+          record.type !== undefined && record.type !== null ? String(record.type).trim() : '';
+        const nameTrim =
+          record.name !== undefined && record.name !== null ? String(record.name).trim() : '';
+
+        const doc = {
+          vaccineName: vaccineNameTrim,
+          type: typeTrim,
+          name: nameTrim,
+          composition: getValue(record.composition, '- not licensed yet -'),
+          strainCoverage: getValue(record.strainCoverage, '- not licensed yet -'),
+          indication: getValue(record.indication, '- not licensed yet -'),
+          contraindication: getValue(record.contraindication, '- not licensed yet -'),
+          dosing: getValue(record.dosing, '- not licensed yet -'),
+          immunogenicity: getValue(record.immunogenicity, '- not licensed yet -'),
+          Efficacy: getValue(record.Efficacy, '- not licensed yet -'),
+          durationOfProtection: getValue(record.durationOfProtection, '- not licensed yet -'),
+          coAdministration: getValue(record.coAdministration, '- not licensed yet -'),
+          reactogenicity: getValue(record.reactogenicity, '- not licensed yet -'),
+          safety: getValue(record.safety, '- not licensed yet -'),
+          vaccinationGoal: getValue(record.vaccinationGoal, '- not licensed yet -'),
+          others: getValue(record.others, '- not licensed yet -'),
+        };
+
+        const existing = await ProductProfile.findOne({
+          vaccineName: vaccineNameTrim,
+          type: typeTrim,
+        });
+
+        let productProfile;
+        if (existing) {
+          productProfile = await ProductProfile.findByIdAndUpdate(
+            existing._id,
+            { $set: doc },
+            { new: true, runValidators: true }
+          );
+          results.updated += 1;
+        } else {
+          productProfile = await ProductProfile.create(doc);
+          results.created += 1;
+        }
+
+        results.success.push(`${productProfile.vaccineName} - ${productProfile.type}`);
+      } catch (error) {
+        results.errors.push({
+          vaccineName: record.vaccineName,
+          error: error.message,
+        });
+      }
+      progress.tick(i, importProgressStats(results));
+    }
+
+    // Update last update time if any product profiles were imported
+    if (results.success.length > 0) {
+      await updateLastUpdate('ProductProfile');
+    }
+
+    respondImport(res, progress, {
+      success: true,
+      message: `Processed ${results.success.length} product profiles successfully`,
+      imported: results.success.length,
+      created: results.created,
+      updated: results.updated,
+      errors: results.errors.length,
+      details: results,
+    });
+  } catch (error) {
+    if (progress && progress.fail(error.message)) {
+      return;
+    }
+    handleError(res, error);
+  }
+};
+
+// @desc    Export product profiles to CSV
+// @route   GET /api/csv/export/product-profiles
+// @access  Private/Admin
+exports.exportProductProfiles = async (req, res) => {
+  try {
+    const productProfiles = await ProductProfile.find().sort({ vaccineName: 1, type: 1 });
+
+    const csvData = await new Promise((resolve, reject) => {
+      stringify(productProfiles, {
+        header: true,
+        columns: [
+          'vaccineName',
+          'type',
+          'name',
+          'composition',
+          'strainCoverage',
+          'indication',
+          'contraindication',
+          'dosing',
+          'immunogenicity',
+          'Efficacy',
+          'durationOfProtection',
+          'coAdministration',
+          'reactogenicity',
+          'safety',
+          'vaccinationGoal',
+          'others',
+        ],
+      }, (err, output) => {
+        if (err) reject(err);
+        else resolve(output);
+      });
+    });
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=product-profiles.csv');
+    // Send with UTF-8 BOM to ensure Excel and other tools recognize UTF-8 encoding
+    res.send('\ufeff' + csvData);
+  } catch (error) {
+    handleError(res, error);
+  }
+};
+
+// @desc    Import manufacturers from CSV
+// @route   POST /api/csv/import/manufacturers
+// @access  Private/Admin
+exports.importManufacturers = async (req, res) => {
+  let progress;
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'CSV file is required',
+      });
+    }
+
+    const records = await parseCSV(req.file.buffer);
+    progress = createImportProgress(req, res, {
+      total: records.length,
+      fileSize: req.file.size,
+    });
+
+    const results = {
+      success: [],
+      errors: [],
+    };
+
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
+      try {
+        const manufacturer = await upsertImported(Manufacturer, ['name'], {
+          name: record.name.trim(),
+          description: record.description ? record.description.trim() : '',
+          history: record.history ? record.history.trim() : '',
+          lastUpdated: record.lastUpdated ? record.lastUpdated.trim() : '',
+          details_website: record.details_website ? record.details_website.trim() : '',
+          details_founded: record.details_founded ? String(record.details_founded).trim() : '',
+          details_headquarters: record.details_headquarters ? record.details_headquarters.trim() : '',
+          details_ceo: record.details_ceo ? record.details_ceo.trim() : '',
+          details_revenue: record.details_revenue ? record.details_revenue.trim() : '',
+          details_operatingIncome: record.details_operatingIncome ? record.details_operatingIncome.trim() : '',
+          details_netIncome: record.details_netIncome ? record.details_netIncome.trim() : '',
+          details_totalAssets: record.details_totalAssets ? record.details_totalAssets.trim() : '',
+          details_totalEquity: record.details_totalEquity ? record.details_totalEquity.trim() : '',
+          details_numberOfEmployees: record.details_numberOfEmployees ? String(record.details_numberOfEmployees).trim() : '',
+          details_products: record.details_products ? record.details_products.trim() : '',
+          licensedVaccineNames: record.licensedVaccineNames ? record.licensedVaccineNames.trim() : '',
+          candidateVaccineNames: record.candidateVaccineNames ? record.candidateVaccineNames.trim() : '',
+        });
+        results.success.push(manufacturer.name);
+      } catch (error) {
+        results.errors.push({
+          name: record.name || 'Unknown',
+          error: error.message,
+        });
+      }
+      progress.tick(i, importProgressStats(results));
+    }
+
+    // Update last update time if any manufacturers were imported
+    if (results.success.length > 0) {
+      await updateLastUpdate('Manufacturer');
+    }
+
+    respondImport(res, progress, {
+      success: true,
+      message: `Imported ${results.success.length} manufacturers successfully`,
+      imported: results.success.length,
+      errors: results.errors.length,
+      details: results,
+    });
+  } catch (error) {
+    if (progress && progress.fail(error.message)) {
+      return;
+    }
+    handleError(res, error);
+  }
+};
+
+// @desc    Export manufacturers to CSV
+// @route   GET /api/csv/export/manufacturers
+// @access  Private/Admin
+exports.exportManufacturers = async (req, res) => {
+  try {
+    const manufacturers = await Manufacturer.find().sort({ name: 1 });
+
+    const csvData = await new Promise((resolve, reject) => {
+      stringify(manufacturers, {
+        header: true,
+        columns: [
+          'name',
+          'description',
+          'history',
+          'lastUpdated',
+          'details_website',
+          'details_founded',
+          'details_headquarters',
+          'details_ceo',
+          'details_revenue',
+          'details_operatingIncome',
+          'details_netIncome',
+          'details_totalAssets',
+          'details_totalEquity',
+          'details_numberOfEmployees',
+          'details_products',
+          'licensedVaccineNames',
+          'candidateVaccineNames',
+        ],
+      }, (err, output) => {
+        if (err) reject(err);
+        else resolve(output);
+      });
+    });
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=manufacturers.csv');
+    // Send with UTF-8 BOM to ensure Excel and other tools recognize UTF-8 encoding
+    res.send('\ufeff' + csvData);
+  } catch (error) {
+    handleError(res, error);
+  }
+};
+
+// @desc    Import manufacturer products from CSV
+// @route   POST /api/csv/import/manufacturer-products
+// @access  Private/Admin
+exports.importManufacturerProducts = async (req, res) => {
+  let progress;
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'CSV file is required',
+      });
+    }
+
+    const records = await parseCSV(req.file.buffer);
+    progress = createImportProgress(req, res, {
+      total: records.length,
+      fileSize: req.file.size,
+    });
+
+    const results = {
+      success: [],
+      errors: [],
+    };
+
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
+      try {
+        const product = await upsertImported(ManufacturerProduct, ['manufacturerName', 'productName'], {
+          manufacturerName: record.manufacturerName.trim(),
+          productName: record.productName.trim(),
+          productDescription: record.productDescription ? record.productDescription.trim() : '',
+        });
+        results.success.push(`${product.manufacturerName} - ${product.productName}`);
+      } catch (error) {
+        results.errors.push({
+          manufacturerName: record.manufacturerName || 'Unknown',
+          error: error.message,
+        });
+      }
+      progress.tick(i, importProgressStats(results));
+    }
+
+    // Update last update time if any manufacturer products were imported
+    if (results.success.length > 0) {
+      await updateLastUpdate('ManufacturerProduct');
+    }
+
+    respondImport(res, progress, {
+      success: true,
+      message: `Imported ${results.success.length} manufacturer products successfully`,
+      imported: results.success.length,
+      errors: results.errors.length,
+      details: results,
+    });
+  } catch (error) {
+    if (progress && progress.fail(error.message)) {
+      return;
+    }
+    handleError(res, error);
+  }
+};
+
+// @desc    Export manufacturer products to CSV
+// @route   GET /api/csv/export/manufacturer-products
+// @access  Private/Admin
+exports.exportManufacturerProducts = async (req, res) => {
+  try {
+    const products = await ManufacturerProduct.find().sort({ manufacturerName: 1, productName: 1 });
+
+    const csvData = await new Promise((resolve, reject) => {
+      stringify(products, {
+        header: true,
+        columns: ['manufacturerName', 'productName', 'productDescription'],
+      }, (err, output) => {
+        if (err) reject(err);
+        else resolve(output);
+      });
+    });
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=manufacturer-products.csv');
+    // Send with UTF-8 BOM to ensure Excel and other tools recognize UTF-8 encoding
+    res.send('\ufeff' + csvData);
+  } catch (error) {
+    handleError(res, error);
+  }
+};
+
+// @desc    Import manufacturer sources from CSV
+// @route   POST /api/csv/import/manufacturer-sources
+// @access  Private/Admin
+exports.importManufacturerSources = async (req, res) => {
+  let progress;
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'CSV file is required',
+      });
+    }
+
+    const records = await parseCSV(req.file.buffer);
+    progress = createImportProgress(req, res, {
+      total: records.length,
+      fileSize: req.file.size,
+    });
+
+    const results = {
+      success: [],
+      errors: [],
+    };
+
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
+      try {
+        const source = await upsertImported(ManufacturerSource, ['manufacturerName', 'link'], {
+          manufacturerName: record.manufacturerName.trim(),
+          lastUpdated: record.lastUpdated ? String(record.lastUpdated).trim() : '',
+          title: record.title.trim(),
+          link: record.link.trim(),
+        });
+        results.success.push(`${source.manufacturerName} - ${source.title}`);
+      } catch (error) {
+        results.errors.push({
+          manufacturerName: record.manufacturerName || 'Unknown',
+          error: error.message,
+        });
+      }
+      progress.tick(i, importProgressStats(results));
+    }
+
+    // Update last update time if any manufacturer sources were imported
+    if (results.success.length > 0) {
+      await updateLastUpdate('ManufacturerSource');
+    }
+
+    respondImport(res, progress, {
+      success: true,
+      message: `Imported ${results.success.length} manufacturer sources successfully`,
+      imported: results.success.length,
+      errors: results.errors.length,
+      details: results,
+    });
+  } catch (error) {
+    if (progress && progress.fail(error.message)) {
+      return;
+    }
+    handleError(res, error);
+  }
+};
+
+// @desc    Export manufacturer sources to CSV
+// @route   GET /api/csv/export/manufacturer-sources
+// @access  Private/Admin
+exports.exportManufacturerSources = async (req, res) => {
+  try {
+    const sources = await ManufacturerSource.find().sort({ manufacturerName: 1, title: 1 });
+
+    const csvData = await new Promise((resolve, reject) => {
+      stringify(sources, {
+        header: true,
+        columns: ['manufacturerName', 'lastUpdated', 'title', 'link'],
+      }, (err, output) => {
+        if (err) reject(err);
+        else resolve(output);
+      });
+    });
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=manufacturer-sources.csv');
+    // Send with UTF-8 BOM to ensure Excel and other tools recognize UTF-8 encoding
+    res.send('\ufeff' + csvData);
+  } catch (error) {
+    handleError(res, error);
+  }
+};
+
+// @desc    Import pathogens from CSV
+// @route   POST /api/csv/import/pathogens
+// @access  Private/Admin
+exports.importPathogens = async (req, res) => {
+  let progress;
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'CSV file is required',
+      });
+    }
+
+    const records = await parseCSV(req.file.buffer);
+    progress = createImportProgress(req, res, {
+      total: records.length,
+      fileSize: req.file.size,
+    });
+
+    const results = {
+      success: [],
+      updated: [],
+      errors: [],
+    };
+
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
+      try {
+        const parsed = fromPathogenCsvRow(record);
+        if (!parsed.name) {
+          results.errors.push({
+            name: record.name || 'Unknown',
+            error: 'Pathogen name is required',
+          });
+          continue;
+        }
+
+        const { pathogen, created } = await upsertPathogenByName(parsed);
+        if (created) {
+          results.success.push(pathogen.name);
+        } else {
+          results.updated.push(pathogen.name);
+        }
+      } catch (error) {
+        results.errors.push({
+          name: record.name || 'Unknown',
+          error: error.message,
+        });
+      }
+      progress.tick(i, importProgressStats(results));
+    }
+
+    // Update last update time if any pathogens were imported
+    if (results.success.length > 0 || results.updated.length > 0) {
+      await updateLastUpdate('Pathogen');
+    }
+
+    const totalProcessed = results.success.length + results.updated.length;
+    respondImport(res, progress, {
+      success: true,
+      message: `Processed ${totalProcessed} pathogens successfully (${results.success.length} created, ${results.updated.length} updated)`,
+      imported: totalProcessed,
+      created: results.success.length,
+      updated: results.updated.length,
+      errors: results.errors.length,
+      details: results,
+    });
+  } catch (error) {
+    if (progress && progress.fail(error.message)) {
+      return;
+    }
+    handleError(res, error);
+  }
+};
+
+// @desc    Export pathogens to CSV
+// @route   GET /api/csv/export/pathogens
+// @access  Private/Admin
+exports.exportPathogens = async (req, res) => {
+  try {
+    const pathogens = await Pathogen.find().sort({ name: 1 });
+    const rows = pathogens.map((pathogen) => toPathogenCsvRow(pathogen));
+
+    const csvData = await new Promise((resolve, reject) => {
+      stringify(rows, {
+        header: true,
+        columns: PATHOGEN_CSV_COLUMNS,
+      }, (err, output) => {
+        if (err) reject(err);
+        else resolve(output);
+      });
+    });
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=pathogens.csv');
+    // Send with UTF-8 BOM to ensure Excel and other tools recognize UTF-8 encoding
+    res.send('\ufeff' + csvData);
+  } catch (error) {
+    handleError(res, error);
+  }
+};
+
+// @desc    Import manufacturer candidates from CSV
+// @route   POST /api/csv/import/manufacturer-candidates
+// @access  Private/Admin
+exports.importManufacturerCandidates = async (req, res) => {
+  let progress;
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'CSV file is required',
+      });
+    }
+
+    const records = await parseCSV(req.file.buffer);
+    progress = createImportProgress(req, res, {
+      total: records.length,
+      fileSize: req.file.size,
+    });
+
+    const results = {
+      success: [],
+      errors: [],
+    };
+
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
+      try {
+        const candidate = await upsertImported(ManufacturerCandidate, ['pathogenName', 'name', 'manufacturer'], {
+          pathogenName: record.pathogenName.trim(),
+          name: record.name.trim(),
+          manufacturer: record.manufacturer ? record.manufacturer.trim() : '',
+          platform: record.platform ? record.platform.trim() : '',
+          clinicalPhase: record.clinicalPhase ? record.clinicalPhase.trim() : '',
+          companyUrl: record.companyUrl ? record.companyUrl.trim() : '',
+          other: record.other ? record.other.trim() : '',
+        });
+        results.success.push(`${candidate.pathogenName} - ${candidate.name}`);
+      } catch (error) {
+        results.errors.push({
+          pathogenName: record.pathogenName || 'Unknown',
+          error: error.message,
+        });
+      }
+      progress.tick(i, importProgressStats(results));
+    }
+
+    // Update last update time if any manufacturer candidates were imported
+    if (results.success.length > 0) {
+      await updateLastUpdate('ManufacturerCandidate');
+    }
+
+    respondImport(res, progress, {
+      success: true,
+      message: `Imported ${results.success.length} manufacturer candidates successfully`,
+      imported: results.success.length,
+      errors: results.errors.length,
+      details: results,
+    });
+  } catch (error) {
+    if (progress && progress.fail(error.message)) {
+      return;
+    }
+    handleError(res, error);
+  }
+};
+
+// @desc    Export manufacturer candidates to CSV
+// @route   GET /api/csv/export/manufacturer-candidates
+// @access  Private/Admin
+exports.exportManufacturerCandidates = async (req, res) => {
+  try {
+    const candidates = await ManufacturerCandidate.find().sort({ pathogenName: 1, name: 1 });
+
+    const csvData = await new Promise((resolve, reject) => {
+      stringify(candidates, {
+        header: true,
+        columns: ['pathogenName', 'name', 'manufacturer', 'platform', 'clinicalPhase', 'companyUrl', 'other'],
+      }, (err, output) => {
+        if (err) reject(err);
+        else resolve(output);
+      });
+    });
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=manufacturer-candidates.csv');
+    // Send with UTF-8 BOM to ensure Excel and other tools recognize UTF-8 encoding
+    res.send('\ufeff' + csvData);
+  } catch (error) {
+    handleError(res, error);
+  }
+};
+
+// @desc    Import NITAGs from CSV
+// @route   POST /api/csv/import/nitags
+// @access  Private/Admin
+exports.importNITAGs = async (req, res) => {
+  let progress;
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'CSV file is required',
+      });
+    }
+
+    const records = await parseCSV(req.file.buffer);
+    progress = createImportProgress(req, res, {
+      total: records.length,
+      fileSize: req.file.size,
+    });
+
+    const results = {
+      success: [],
+      errors: [],
+    };
+
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
+      try {
+        const nitag = await upsertImported(NITAG, ['country'], {
+          country: record.country.trim(),
+          availableNitag: record.availableNitag ? record.availableNitag.trim() : '',
+          availableWebsite: record.availableWebsite ? record.availableWebsite.trim() : '',
+          websiteUrl: record.websiteUrl ? record.websiteUrl.trim() : '',
+          nationalNitagName: record.nationalNitagName ? record.nationalNitagName.trim() : '',
+          yearEstablished: record.yearEstablished ? String(record.yearEstablished).trim() : '',
+        });
+        results.success.push(nitag.country);
+      } catch (error) {
+        results.errors.push({
+          country: record.country || 'Unknown',
+          error: error.message,
+        });
+      }
+      progress.tick(i, importProgressStats(results));
+    }
+
+    // Update last update time if any NITAGs were imported
+    if (results.success.length > 0) {
+      await updateLastUpdate('NITAG');
+    }
+
+    respondImport(res, progress, {
+      success: true,
+      message: `Imported ${results.success.length} NITAGs successfully`,
+      imported: results.success.length,
+      errors: results.errors.length,
+      details: results,
+    });
+  } catch (error) {
+    if (progress && progress.fail(error.message)) {
+      return;
+    }
+    handleError(res, error);
+  }
+};
+
+// @desc    Export NITAGs to CSV
+// @route   GET /api/csv/export/nitags
+// @access  Private/Admin
+exports.exportNITAGs = async (req, res) => {
+  try {
+    const nitags = await NITAG.find().sort({ country: 1 });
+
+    const csvData = await new Promise((resolve, reject) => {
+      stringify(nitags, {
+        header: true,
+        columns: ['country', 'availableNitag', 'availableWebsite', 'websiteUrl', 'nationalNitagName', 'yearEstablished'],
+      }, (err, output) => {
+        if (err) reject(err);
+        else resolve(output);
+      });
+    });
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=nitags.csv');
+    // Send with UTF-8 BOM to ensure Excel and other tools recognize UTF-8 encoding
+    res.send('\ufeff' + csvData);
+  } catch (error) {
+    handleError(res, error);
+  }
+};
+
+// @desc    Import licensers from CSV
+// @route   POST /api/csv/import/licensers
+// @access  Private/Admin
+exports.importLicensers = async (req, res) => {
+  let progress;
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'CSV file is required',
+      });
+    }
+
+    const records = await parseCSV(req.file.buffer);
+    progress = createImportProgress(req, res, {
+      total: records.length,
+      fileSize: req.file.size,
+    });
+
+    const results = {
+      success: [],
+      errors: [],
+    };
+
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
+      try {
+        const country = (record.country || record['Country'] || '').trim();
+        const acronym = (record.acronym || record['Acronym'] || '').trim();
+        const fullName = (record.fullName || record['Licensing Authority'] || record['fullName'] || acronym).trim();
+        const parentOrganisation = (record.parentOrganisation || record['Parent Organisation'] || record['Parent Organization'] || '').trim();
+        const description = (record.description || record['Simple Description'] || record['Description'] || '').trim();
+        const approvalRoute = (record.approvalRoute || record['Approval Route'] || '').trim();
+        const vaccineRegulatoryRole = (record.vaccineRegulatoryRole || record['Vaccine Regulatory Role'] || '').trim();
+        const regulatoryModel = (record.regulatoryModel || record['Regulatory Model'] || '').trim();
+        const website = (record.website || record['Official Website'] || record['Website'] || '').trim();
+        const regulatorySource = (record.regulatorySource || record['Regulatory Source'] || '').trim();
+        const region = (record.region || record['Region'] || '').trim();
+
+        if (!acronym && !fullName) {
+          throw new Error('Acronym or Licensing Authority name is required');
+        }
+
+        const filter = country ? { country } : { acronym };
+        const updateData = {
+          acronym: acronym || fullName,
+          fullName: fullName || acronym,
+          country,
+          region,
+          parentOrganisation,
+          description,
+          approvalRoute,
+          vaccineRegulatoryRole,
+          regulatoryModel,
+          website,
+          regulatorySource,
+        };
+
+        const licenser = await Licenser.findOneAndUpdate(
+          filter,
+          { $set: updateData },
+          { new: true, upsert: true, runValidators: false }
+        );
+
+        results.success.push(licenser.acronym || licenser.country);
+      } catch (error) {
+        results.errors.push({
+          acronym: record.acronym || record['Acronym'] || record['Country'] || 'Unknown',
+          error: error.message,
+        });
+      }
+      progress.tick(i, importProgressStats(results));
+    }
+
+    // Update last update time if any licensers were imported
+    if (results.success.length > 0) {
+      await updateLastUpdate('Licenser');
+    }
+
+    respondImport(res, progress, {
+      success: true,
+      message: `Imported ${results.success.length} licensers successfully`,
+      imported: results.success.length,
+      errors: results.errors.length,
+      details: results,
+    });
+  } catch (error) {
+    if (progress && progress.fail(error.message)) {
+      return;
+    }
+    handleError(res, error);
+  }
+};
+
+// @desc    Export licensers to CSV
+// @route   GET /api/csv/export/licensers
+// @access  Private/Admin
+exports.exportLicensers = async (req, res) => {
+  try {
+    const licensers = await Licenser.find().sort({ country: 1, acronym: 1 });
+
+    const csvData = await new Promise((resolve, reject) => {
+      stringify(licensers, {
+        header: true,
+        columns: [
+          'country',
+          'fullName',
+          'acronym',
+          'parentOrganisation',
+          'description',
+          'approvalRoute',
+          'vaccineRegulatoryRole',
+          'regulatoryModel',
+          'website',
+          'regulatorySource',
+          'region',
+        ],
+      }, (err, output) => {
+        if (err) reject(err);
+        else resolve(output);
+      });
+    });
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=licensers.csv');
+    // Send with UTF-8 BOM to ensure Excel and other tools recognize UTF-8 encoding
+    res.send('\ufeff' + csvData);
+  } catch (error) {
+    handleError(res, error);
+  }
+};
+
